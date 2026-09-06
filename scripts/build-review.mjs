@@ -1,0 +1,10 @@
+import {build} from 'esbuild';
+import {readFile,readdir,writeFile,mkdir} from 'node:fs/promises';
+const bundle=await build({entryPoints:['preview/entry.tsx'],bundle:true,platform:'browser',format:'iife',write:false,minify:true,define:{'process.env.NODE_ENV':'"production"'},jsx:'automatic'});
+const names=await readdir('dist/client/assets');
+const css=(await Promise.all(names.filter(n=>n.endsWith('.css')).map(n=>readFile('dist/client/assets/'+n,'utf8')))).join('\n');
+const js=bundle.outputFiles[0].text.replace(/<\/script/gi,'<\\/script');
+const html='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Setwise — Interactive preview</title><style>'+css+'\n.review-banner{font-family:Arial,sans-serif;background:#dfedc9;color:#2f5127;font-size:12px;padding:10px 20px;text-align:center;font-weight:700;letter-spacing:.6px}.review-banner span{display:block;font-weight:400;letter-spacing:0;margin-top:4px;font-size:12px}</style></head><body><div id="root"></div><script>'+js+'</script></body></html>';
+await mkdir('/workspace/scratch/dbccf67e112f/deliverables',{recursive:true});
+await writeFile('/workspace/scratch/dbccf67e112f/deliverables/setwise-preview.html',html);
+console.log('Interactive preview written:',Buffer.byteLength(html),'bytes.');

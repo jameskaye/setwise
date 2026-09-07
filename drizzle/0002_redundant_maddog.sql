@@ -1,0 +1,1 @@
+ALTER TABLE `coach_messages` ADD `request_payload` text;

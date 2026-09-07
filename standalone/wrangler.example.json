@@ -1,0 +1,10 @@
+{
+  "name":"setwise",
+  "main":"./worker.ts",
+  "compatibility_date":"2026-09-01",
+  "compatibility_flags":["nodejs_compat"],
+  "assets":{"directory":"../standalone-dist/client","binding":"ASSETS","run_worker_first":true},
+  "d1_databases":[{"binding":"DB","database_name":"setwise","database_id":"REPLACE_WITH_CREATED_DATABASE_ID","migrations_dir":"../drizzle"}],
+  "vars":{"AUTH_MODE":"standalone","OWNER_ID":"personal-owner"},
+  "observability":{"enabled":false}
+}

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 import {DatabaseSync} from 'node:sqlite';
-import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {readFileSync,readdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -41,7 +41,7 @@ test('pain, limits and conservative coach instructions',()=>{
 });
 let sql;
 function openDb(){sql=new DatabaseSync(join(temp,'workouts.sqlite'));sql.exec('PRAGMA foreign_keys=ON');}
-openDb();sql.exec(readFileSync('drizzle/0000_common_trauma.sql','utf8'));
+openDb();for(const file of readdirSync('drizzle').filter(x=>x.endsWith('.sql')).sort())sql.exec(readFileSync('drizzle/'+file,'utf8'));
 const adapter={
  prepare(text){
   return {bind(...values){
@@ -51,7 +51,7 @@ const adapter={
     const info=stmt.run(...values);
     return {results:[],meta:{changes:Number(info.changes)}};
    };
-   return {first:async()=>execute().results[0]??null,run:async()=>execute(),execute};
+   return {first:async()=>execute().results[0]??null,all:async()=>execute(),run:async()=>execute(),execute};
   }};
  },
  async batch(statements){

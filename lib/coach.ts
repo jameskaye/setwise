@@ -1,9 +1,11 @@
 import type {Variant, Session, LoggedSet, Side, SetType, Recommendation, Rules} from './model';
+import {sessionVariant} from './routine';
 const clamp=(n:number,min:number,max:number)=>Math.max(min,Math.min(max,n));
 const sameSide=(s:LoggedSet,side:Side)=>s.side===side || s.side==='unknown';
 export function recommend(v:Variant, session:Session, all:LoggedSet[], side:Side, type:SetType='working', now=Date.now()):Recommendation {
+  v=sessionVariant(v,session);
   const rules=session.rules;
-  const min=rules.minReps??v.minReps,max=rules.maxReps??v.maxReps,targetRir=rules.targetRir??2;
+  const min=rules.minReps??v.minReps,max=rules.maxReps??v.maxReps,targetRir=rules.targetRir??session.prescriptions?.find(p=>p.variantId===v.id)?.targetRir??2;
   const base={min,max,targetRir,reps:min,weight:null as number|null,status:'ready' as Recommendation['status'],label:'Next set'};
   const relevant=all.filter(s=>s.variantId===v.id && sameSide(s,side)).sort((a,b)=>a.createdAt-b.createdAt || a.id.localeCompare(b.id));
   const current=relevant.filter(s=>s.sessionId===session.id);

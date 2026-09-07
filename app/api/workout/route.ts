@@ -1,4 +1,6 @@
 import {z} from 'zod';
+import {browserOwner,sameOrigin} from '@/lib/server-auth';
+import {ApiError,latestRoutine} from '@/db/routine-store';
 import {database,query,initialize,snapshot} from '@/db/store';
 import {interpretCoach,recommend} from '@/lib/coach';
 import type {LoggedSet} from '@/lib/model';
@@ -8,20 +10,19 @@ const action=z.discriminatedUnion('action',[
  z.object({action:z.literal('log'),id:id,sessionId:id,variantId:id,weight:num.min(0).max(2000),reps:num.int().min(1).max(100),rir:num.int().min(0).max(3),side:z.enum(['left','right','both']),type:z.enum(['working','warmup','backoff','drop']),painLocation:z.string().max(100),painSeverity:num.int().min(0).max(10),note:z.string().max(1000)}),
  z.object({action:z.literal('undo'),setId:id,sessionId:id}),
  z.object({action:z.literal('finish'),sessionId:id}),
- z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30)}),
+ z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30),workoutId:id.optional(),expectedRoutineRevision:z.number().int().min(0).optional()}),
  z.object({action:z.literal('session'),sessionId:id,name:z.string().trim().min(1).max(80),notes:z.string().max(4000),plan:z.array(id).min(1).max(30)}),
  z.object({action:z.literal('coach'),id:id,sessionId:id,variantId:id,message:z.string().trim().min(1).max(2000)}),
  z.object({action:z.literal('variant'),id:id,exerciseId:z.string().max(180),baseName:z.string().trim().max(80),name:z.string().trim().min(1).max(100),equipment:z.string().trim().min(1).max(100),unilateral:z.boolean(),loadMode:z.enum(['per leg','per dumbbell','total load','machine load']),increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)}),
  z.object({action:z.literal('targets'),variantId:id,increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)})
 ]);
 class InputError extends Error{}
-function ownerOf(r:Request){const owner=r.headers.get('oai-authenticated-user-id');if(!owner)throw new InputError('Sign in to open your workouts.');return owner;}
 function reply(body:unknown,status=200){return Response.json(body,{status,headers:{'Cache-Control':'no-store, private'}});}
-function errorReply(e:unknown){if(e instanceof InputError)return reply({error:e.message},e.message.startsWith('Sign in')?401:400);if(e instanceof z.ZodError)return reply({error:'Check your entries. Weight, reps, and target ranges must be valid numbers.'},400);console.error('Workout storage request failed',e);return reply({error:'Could not reach your saved workouts. Your entries are still here. Please retry.'},503);}
-export async function GET(r:Request){try{const owner=ownerOf(r);await initialize(owner);return reply(await snapshot(owner));}catch(e){return errorReply(e);}}
+function errorReply(e:unknown){if(e instanceof ApiError)return reply({error:e.message},e.status);if(e instanceof InputError)return reply({error:e.message},e.message.startsWith('Sign in')?401:400);if(e instanceof z.ZodError)return reply({error:'Check your entries. Weight, reps, and target ranges must be valid numbers.'},400);console.error('Workout storage request failed',e);return reply({error:'Could not reach your saved workouts. Your entries are still here. Please retry.'},503);}
+export async function GET(r:Request){try{const owner=await browserOwner(r);await initialize(owner);return reply(await snapshot(owner));}catch(e){return errorReply(e);}}
 export async function POST(r:Request){try{
-  const owner=ownerOf(r);
-  if(r.headers.get('sec-fetch-site')==='cross-site')return reply({error:'Open this action from your workout.'},403);
+  const owner=await browserOwner(r);
+  sameOrigin(r);
   const a=action.parse(await r.json()),state=await snapshot(owner),now=Date.now();
   const session='sessionId' in a?state.sessions.find(s=>s.id===a.sessionId):undefined;
   if('sessionId' in a && (!session||session.status!=='active'))throw new InputError('This workout has finished. Reload or start another workout.');
@@ -48,7 +49,13 @@ export async function POST(r:Request){try{
   } else if(a.action==='finish'){await query('UPDATE sessions SET status = ?, ended_at = ? WHERE id = ? AND owner = ?', 'finished',now,a.sessionId,owner).run();}
   else if(a.action==='start'){
     if(state.sessions.some(s=>s.status==='active'))return reply(state);
-    await query('INSERT OR IGNORE INTO sessions (id,owner,name,started_at,ended_at,status,notes,plan,rules) VALUES (?,?,?,?,?,?,?,?,?)',a.id,owner,a.name,now,null,'active','',JSON.stringify(a.plan),'{}').run();
+    const saved=await latestRoutine(owner);
+    if(saved&&a.expectedRoutineRevision!==saved.revision)throw new ApiError(409,'Your routine changed. Reload before starting.');
+    const template=saved?.routine.workouts.find(w=>w.id===a.workoutId);
+    if(saved&&!template)throw new InputError('Choose a workout from your saved routine.');
+    const rules=template?.timeLimitMinutes?{deadline:now+template.timeLimitMinutes*60000}:{};
+    const context=template?[template.notes,saved!.routine.notes,...saved!.routine.constraints].filter(Boolean).join('\n'):'';
+    await query('INSERT OR IGNORE INTO sessions (id,owner,name,started_at,ended_at,status,notes,plan,rules,prescriptions,routine_revision) VALUES (?,?,?,?,?,?,?,?,?,?,?)',a.id,owner,template?.name??a.name,now,null,'active',context,JSON.stringify(template?.exercises.map(e=>e.variantId)??a.plan),JSON.stringify(rules),JSON.stringify(template?.exercises??[]),saved?.revision??null).run();
   } else if(a.action==='session'){await query('UPDATE sessions SET name = ?, notes = ?, plan = ? WHERE id = ? AND owner = ?',a.name,a.notes,JSON.stringify(a.plan),a.sessionId,owner).run();}
   else if(a.action==='coach'){
     if(state.messages.some(m=>m.id===a.id))return reply(state);

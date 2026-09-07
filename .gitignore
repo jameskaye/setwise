@@ -44,3 +44,12 @@ next-env.d.ts
 *.tsbuildinfo
 
 /public/qa-*.html
+
+/standalone-dist/
+/standalone/wrangler.json
+/standalone/.dev.vars
+/.dev.vars
+!/.env.example
+/.setwise-secrets/
+*setwise-backup*.json
+*setwise-import*.sql

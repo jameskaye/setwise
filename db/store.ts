@@ -1,5 +1,6 @@
 import {env} from 'cloudflare:workers';
 import {starterExercises, type Snapshot} from '@/lib/model';
+import {latestRoutine} from './routine-store';
 export function database(){if(!env.DB)throw new Error('Workout storage is unavailable');return env.DB;}
 export function query(sql:string,...values:unknown[]){return database().prepare(sql).bind(...values);}
 const camel=(r:Record<string,unknown>)=>Object.fromEntries(Object.entries(r).filter(([k])=>k!=='owner').map(([k,v])=>[k.replace(/_([a-z])/g,(_,c)=>c.toUpperCase()),v]));
@@ -21,5 +22,5 @@ export async function snapshot(owner:string):Promise<Snapshot>{
   const names=['exercises','variants','sessions','sets','coach_messages','progressions'];
   const rows=await database().batch(names.map(name=>query(`SELECT * FROM ${name} WHERE owner = ?`,owner)));
   const [exercises,variants,sessions,sets,messages,progressions]=rows.map(r=>r.results.map(x=>camel(x as Record<string,unknown>)));
-  return {exercises,variants,sessions:sessions.map(s=>({...s,plan:JSON.parse(s.plan as string),rules:JSON.parse(s.rules as string)})),sets,messages,progressions:progressions.map(p=>({...p,recommendation:JSON.parse(p.recommendation as string)}))} as unknown as Snapshot;
+  return {exercises,variants,sessions:sessions.map(s=>({...s,plan:JSON.parse(s.plan as string),rules:JSON.parse(s.rules as string),prescriptions:JSON.parse((s.prescriptions as string)||'[]')})),sets,messages,progressions:progressions.map(p=>({...p,recommendation:JSON.parse(p.recommendation as string)})),routine:await latestRoutine(owner)} as unknown as Snapshot;
 }

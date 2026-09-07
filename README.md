@@ -20,7 +20,7 @@ These are adjustable training heuristics, not a medical assessment or a predicti
 
 ## Review before deployment
 
-The source and deployment archive are saved without publishing. The standalone interactive review file is generated from the same application component by `scripts/build-review.mjs`. It uses a clearly labeled, in-memory sample adapter. Test entries in that file reset on reload and never write real workout history. The preview adapter is not imported by the Site route.
+The original workout logger is privately published through Sites. The coaching API and portable-host changes are being prepared separately; do not assume the external GPT is connected. The standalone interactive review file is generated from the same application component by `scripts/build-review.mjs`. It uses a clearly labeled, in-memory sample adapter. Test entries in that file reset on reload and never write real workout history. The preview adapter is not imported by the Site route.
 
 ## Validation
 
@@ -29,3 +29,13 @@ The source and deployment archive are saved without publishing. The standalone i
 - Build with the Sites build helper. Generate migrations with `npm run db:generate` when the schema changes.
 
 Browser QA completed in Chrome at 390 × 844 and 375 × 667 layouts. The actual application was exercised against local D1 for set logging, independent unilateral recommendations, coach constraints, pain pauses, set types, session history, variant creation, reopening, undo, and an uncertain-save retry without duplication. The standalone review was also checked with JavaScript disabled to verify that its initial layout remains visible. This is not an iOS Safari or hosted production test. Live D1 wiring is only activated when the saved Site is deployed.
+
+## Portable hosting and ChatGPT coaching
+
+See `docs/DEPLOY.md` for Cloudflare hosting and `docs/gpt/SETUP.md` for the private GPT. The standalone build reuses the logger and server logic; only rendering and authentication differ from Sites. The GPT API is disabled in Sites mode because a GPT Action cannot reuse the browser's private Sites session. No MCP server is declared.
+
+The routine contains named workout templates and per-exercise prescriptions. Each save stores an immutable revision, including the original baseline, and rejects stale versions. Session adjustments preserve actual logged sets and existing session rules. New sessions capture prescriptions from the chosen saved routine, so later routine changes do not rewrite previous sessions.
+
+Validation for this change: all ten automated tests pass; TypeScript and both build profiles pass; Wrangler standalone upload dry-run succeeds. The API integration tests cover authorization, separate browser/coach keys, forged identity rejection, cross-origin login rejection, persistent revisions after reopening SQLite, plan changes in new sessions, current-session changes, retries, conflicts, finished sessions, tenant isolation, and backup/import round-trip including SQL-looking note text. Browser QA uses a 390 × 844 Chrome frame displaying a synthetic snapshot produced by those integration tests; today's 10–12 range is distinct from the future 12–15 range. Native iPhone GPT Actions and a live external Cloudflare deployment remain untested.
+
+The old starter render test assumed a Node-compatible stateless Worker and preview metadata; it is replaced with checks for the portable entry's actual title, runnable script, stylesheet and emitted asset existence. Unused starter scrollbar-catalog expectations were removed; used animation/reduced-motion and component semantics checks remain.

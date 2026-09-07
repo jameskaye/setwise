@@ -13,7 +13,7 @@ export function recommend(v:Variant, session:Session, all:LoggedSet[], side:Side
   if(rules.skipped?.includes(v.id)) return {...base,status:'pause',label:'Exercise skipped',reason:'Your workout constraint pauses this exercise. Choose another exercise or update the constraint.'};
   if(current.some(s=>s.painSeverity>0)) return {...base,status:'pause',label:'Pause this exercise',reason:'Pain was logged on this side. Switch exercises; do not push through pain.'};
   if(rules.deadline && now>=rules.deadline) return {...base,status:'complete',label:'Time is up',reason:'You reached your workout time limit. Finish the session or update the limit.'};
-  if(type==='working' && work.length>=(rules.maxSets??v.defaultSets)) return {...base,weight:last?.weight??null,reps:clamp(last?.reps??min,min,max),status:'complete',label:'Target complete',reason:`${work.length} sets logged${v.unilateral?' on this side':''}. Move on, or deliberately add a backoff or drop set.`};
+  if(type!=='warmup' && (type==='working'||rules.maxSets!==undefined) && work.length>=(rules.maxSets??v.defaultSets)) return {...base,weight:last?.weight??null,reps:clamp(last?.reps??min,min,max),status:'complete',label:'Target complete',reason:`${work.length} sets logged${v.unilateral?' on this side':''}. ${rules.maxSets!==undefined?'Your coach set limit is reached.':'Move on, or deliberately add a backoff or drop set.'}`};
   if(!last) return {...base,status:'calibrate',label:'Find your starting weight',reason:`No working-set history for this variant. Pick a familiar light load for ${min}–${max} reps with ${targetRir}+ reps left.`};
   const step=v.increment;
   const down=(w:number,fraction=.05)=>Math.max(0,Math.floor((w-Math.max(step,w*fraction))/step)*step);

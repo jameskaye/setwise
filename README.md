@@ -28,4 +28,4 @@ The source and deployment archive are saved without publishing. The standalone i
 - `npx tsc --noEmit`: TypeScript validation.
 - Build with the Sites build helper. Generate migrations with `npm run db:generate` when the schema changes.
 
-Browser testing has not been run. Live D1 wiring is only activated when the saved Site is deployed.
+Browser QA completed in Chrome at 390 × 844 and 375 × 667 layouts. The actual application was exercised against local D1 for set logging, independent unilateral recommendations, coach constraints, pain pauses, set types, session history, variant creation, reopening, undo, and an uncertain-save retry without duplication. The standalone review was also checked with JavaScript disabled to verify that its initial layout remains visible. This is not an iOS Safari or hosted production test. Live D1 wiring is only activated when the saved Site is deployed.

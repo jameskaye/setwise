@@ -3,8 +3,8 @@ import {createRoot} from 'react-dom/client';
 import WorkoutApp from '../app/workout-app';
 import {starterExercises,type Snapshot,type LoggedSet,type Variant} from '../lib/model';
 import {recommend,interpretCoach} from '../lib/coach';
-const now=Date.now();
-let data:Snapshot={exercises:starterExercises.map(v=>({id:'ex-'+v.key,name:v.base})),variants:starterExercises.map(v=>({...v,id:v.key,exerciseId:'ex-'+v.key})),sessions:[{id:'known',name:'Known history',startedAt:0,endedAt:null,status:'seed',notes:'User-supplied history. Date, side, and RIR were not supplied.',plan:['extension'],rules:{}},{id:'today',name:'Leg day',startedAt:now,endedAt:null,status:'active',notes:'',plan:starterExercises.slice(0,5).map(v=>v.key),rules:{}}],sets:[{id:'known-set',variantId:'extension',sessionId:'known',createdAt:0,weight:95,reps:10,rir:null,side:'unknown',type:'working',painLocation:'',painSeverity:0,note:'User-supplied performance; side and date unknown.',suggestedWeight:null,suggestedReps:null}],messages:[],progressions:[]};
+import {createPreviewData} from './data';
+let data=createPreviewData();
 window.fetch=async(_input,init)=>{
  try{
  if(init?.method==='POST'){
@@ -26,4 +26,4 @@ window.fetch=async(_input,init)=>{
  }catch(e){return new Response(JSON.stringify({error:(e as Error).message}),{status:400});}
 };
 // This file is an isolated, non-authoritative review surface. Real Site writes go to D1.
-createRoot(document.getElementById('root')!).render(<><div className="review-banner">INTERACTIVE PREVIEW <span>Sample data · test sets reset on reload · Site unpublished</span></div><WorkoutApp initialData={structuredClone(data)}/></>);
+createRoot(document.getElementById('root')!).render(<><div className="review-banner">INTERACTIVE PREVIEW <span>Sample data · resets on reload</span></div><WorkoutApp initialData={structuredClone(data)}/></>);

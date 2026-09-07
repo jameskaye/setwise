@@ -30,6 +30,8 @@ test('pain, limits and conservative coach instructions',()=>{
  assert.equal(recommend(v,session,[seed,set({painSeverity:1})],'left').status,'pause');
  const sets=[1,2,3].map(i=>set({id:'s'+i,createdAt:i}));
  assert.equal(recommend(v,session,sets,'left').status,'complete');
+ assert.equal(recommend(v,{...session,rules:{maxSets:2}},sets,'left','drop').status,'complete');
+ assert.equal(recommend(v,{...session,rules:{maxSets:2}},sets,'left','backoff').status,'complete');
  const {rules}=interpretCoach('I am tired. Only 2 sets per exercise. 10–15 reps. Skip leg press.',{},[v,{id:'press',name:'Leg press'}],v.id,1000);
  assert.equal(recommend(v,{...session,rules:{easy:true,easySince:1000}},[seed,set()],'left').weight,85);
  assert.equal(rules.easy,true);assert.equal(rules.maxSets,2);assert.equal(rules.minReps,10);assert.deepEqual(rules.skipped,['press']);

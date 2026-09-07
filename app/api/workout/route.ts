@@ -6,7 +6,7 @@ import {interpretCoach,recommend} from '@/lib/coach';
 import type {LoggedSet} from '@/lib/model';
 export const dynamic='force-dynamic';
 const id=z.string().min(1).max(180), num=z.number().finite();
-const action=z.discriminatedUnion('action',[
+export const actionSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('log'),id:id,sessionId:id,variantId:id,weight:num.min(0).max(2000),reps:num.int().min(1).max(100),rir:num.int().min(0).max(3),side:z.enum(['left','right','both']),type:z.enum(['working','warmup','backoff','drop']),painLocation:z.string().max(100),painSeverity:num.int().min(0).max(10),note:z.string().max(1000)}),
  z.object({action:z.literal('undo'),setId:id,sessionId:id}),
  z.object({action:z.literal('finish'),sessionId:id}),
@@ -23,13 +23,16 @@ export async function GET(r:Request){try{const owner=await browserOwner(r);await
 export async function POST(r:Request){try{
   const owner=await browserOwner(r);
   sameOrigin(r);
-  const a=action.parse(await r.json()),state=await snapshot(owner),now=Date.now();
+  return await performWorkout(owner,await r.json());
+}catch(e){return errorReply(e);}}
+export async function performWorkout(owner:string,input:unknown){try{
+  const a=actionSchema.parse(input),state=await snapshot(owner),now=Date.now();
   const session='sessionId' in a?state.sessions.find(s=>s.id===a.sessionId):undefined;
   if('sessionId' in a && (!session||session.status!=='active'))throw new InputError('This workout has finished. Reload or start another workout.');
   if('variantId' in a && !state.variants.some(v=>v.id===a.variantId))throw new InputError('Exercise variant not found.');
   if('plan' in a && (new Set(a.plan).size!==a.plan.length || a.plan.some(id=>!state.variants.some(v=>v.id===id))))throw new InputError('Choose valid, distinct exercises.');
   if(a.action==='log'){
-    const existing=state.sets.find(s=>s.id===a.id);if(existing)return reply(state);
+    const existing=state.sets.find(s=>s.id===a.id);if(existing){if(Object.entries(a).some(([key,value])=>key!=='action'&&existing[key as keyof LoggedSet]!==value))throw new ApiError(409,'Set ID was already used for a different set.');return reply(state);}
     const v=state.variants.find(v=>v.id===a.variantId)!;
     if((v.unilateral && a.side==='both')||(!v.unilateral && a.side!=='both'))throw new InputError('Select the correct side for this exercise.');
     if(!session!.plan.includes(v.id))throw new InputError('Add this exercise to your workout first.');

@@ -1,4 +1,5 @@
 import {env} from 'cloudflare:workers';
+import {handleMcp} from '../lib/mcp';
 import * as workout from '../app/api/workout/route';
 import * as context from '../app/api/coach/context/route';
 import * as routine from '../app/api/coach/routine/route';
@@ -14,6 +15,7 @@ export default {async fetch(r:Request):Promise<Response>{
  if(env.AUTH_MODE!=='standalone')return json({error:'Standalone authentication must be configured before using this deployment.'},503);
  const url=new URL(r.url),path=url.pathname;
  try{
+  if(path==='/mcp')return handleMcp(r);
   if(path==='/login'){
    if(r.method==='GET')return new Response(loginHTML(),{headers:{'Content-Type':'text/html','Cache-Control':'no-store'}});
    if(r.method!=='POST')return new Response(null,{status:405});

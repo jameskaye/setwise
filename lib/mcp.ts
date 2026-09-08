@@ -52,14 +52,14 @@ async function invoke(owner:string,name:string,args:unknown){
  throw new ApiError(400,'Unknown tool.');
 }
 const rpcError=(id:unknown,code:number,message:string,status=200)=>json({jsonrpc:'2.0',id,error:{code,message}},status);
-export async function handleMcp(r:Request):Promise<Response>{
+export async function handleMcp(r:Request,verifiedOwner?:string):Promise<Response>{
  let owner:string;
  try{
   const origin=r.headers.get('origin');
   if(origin&&origin!==new URL(r.url).origin)throw new ApiError(403,'Origin is not allowed.');
   // Sites dispatch verifies the caller and supplies the same owner identity as the web app.
   // Portable hosting uses its separate server credential and never trusts Sites headers.
-  owner=env.AUTH_MODE==='standalone'?await actionOwner(r):await browserOwner(r);
+  owner=verifiedOwner??(env.AUTH_MODE==='standalone'?await actionOwner(r):await browserOwner(r));
  }catch(e){return json({error:e instanceof Error?e.message:'Unauthorized'},e instanceof ApiError?e.status:401);}
  if(r.method!=='POST')return new Response(null,{status:405,headers:{Allow:'POST','Cache-Control':'no-store'}});
  if(!r.headers.get('content-type')?.toLowerCase().startsWith('application/json'))return rpcError(null,-32600,'Use application/json',415);

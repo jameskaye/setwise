@@ -46,6 +46,7 @@ next-env.d.ts
 /public/qa-*.html
 
 /standalone-dist/
+/standalone/standalone-dist/
 /standalone/wrangler.json
 /standalone/.dev.vars
 /.dev.vars

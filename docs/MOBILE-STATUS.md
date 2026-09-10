@@ -18,7 +18,7 @@ The standalone entry is `standalone/worker.ts`. Cloudflare D1 is the source of t
 
 One endpoint, `/api/coach`, handles status/history (`GET`) and proposal/application (`POST`). Only proposal generation calls OpenRouter. The model defaults to `openai/gpt-4.1-mini`; its structured-output support was verified against the live OpenRouter model catalog.
 
-Set `OPENROUTER_API_KEY` as a Worker secret. Never add the key to frontend variables or source control. The key was not available during this implementation, so live model output remains unverified.
+Set `OPENROUTER_API_KEY` as a Worker secret. Never add the key to frontend variables or source control. The key is configured as a Cloudflare Worker secret. A live OpenRouter call successfully produced a validated current-workout proposal (two sets per exercise, 3 RIR). The proposal was not applied, and a before/after database snapshot confirmed workout and history were unchanged. Future deployments must preserve the OPENROUTER_API_KEY secret binding.
 
 The model returns an explanation and at most one schema-validated operation: `adjust_workout` or `replace_routine`. Existing exercise IDs must be used. Unknown IDs, duplicate exercises, invalid ranges, arbitrary SQL/actions, and client-supplied operation modifications are rejected. The user reviews named exercises and targets and taps Apply. Application uses a stored proposal, ownership checks, revision checks, and idempotent writes. Logged sets are preserved. Proposals expire after 24 hours. Generation is limited to 10 requests per owner per 10 minutes and has a 45-second provider timeout.
 

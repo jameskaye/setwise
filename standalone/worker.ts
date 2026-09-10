@@ -1,10 +1,6 @@
 import {env} from 'cloudflare:workers';
-import {handleMcp} from '../lib/mcp';
 import * as workout from '../app/api/workout/route';
-import * as context from '../app/api/coach/context/route';
-import * as routine from '../app/api/coach/routine/route';
-import * as history from '../app/api/coach/history/route';
-import * as apply from '../app/api/coach/apply/route';
+import * as coach from '../app/api/coach/route';
 import * as backup from '../app/api/export/route';
 import {ApiError} from '../db/routine-store';
 import {json,browserOwner,sameOrigin,digest,equal,makeCookie} from '../lib/server-auth';
@@ -15,7 +11,15 @@ export default {async fetch(r:Request):Promise<Response>{
  if(env.AUTH_MODE!=='standalone')return json({error:'Standalone authentication must be configured before using this deployment.'},503);
  const url=new URL(r.url),path=url.pathname;
  try{
-  if(path==='/mcp')return handleMcp(r);
+  if(path==='/mcp'||path==='/authorize'||path==='/token'||path==='/register'||path.startsWith('/.well-known/'))return json({error:'Not found'},404);
+  if(['/manifest.webmanifest','/sw.js','/offline.html','/icon-192.png','/icon-512.png','/apple-touch-icon.png'].includes(path)||path.startsWith('/assets/')){
+   if(!env.ASSETS)throw new ApiError(503,'App assets are not configured.');
+   const asset=await env.ASSETS.fetch(r);const headers=new Headers(asset.headers);
+   if(path==='/manifest.webmanifest')headers.set('Content-Type','application/manifest+json');
+   if(path.endsWith('.png'))headers.set('Content-Type','image/png');
+   if(path==='/sw.js')headers.set('Cache-Control','no-cache');
+   return new Response(asset.body,{status:asset.status,headers});
+  }
   if(path==='/login'){
    if(r.method==='GET')return new Response(loginHTML(),{headers:{'Content-Type':'text/html','Cache-Control':'no-store'}});
    if(r.method!=='POST')return new Response(null,{status:405});
@@ -28,12 +32,12 @@ export default {async fetch(r:Request):Promise<Response>{
   }
   if(path==='/logout'&&r.method==='POST'){sameOrigin(r);return new Response(null,{status:303,headers:{Location:'/login','Set-Cookie':'__Host-setwise=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0'}});}
   const routes:Record<string,Record<string,(r:Request)=>Promise<Response>>>={
-   '/api/workout':{GET:workout.GET,POST:workout.POST},'/api/coach/context':{GET:context.GET},'/api/coach/routine':{GET:routine.GET,PUT:routine.PUT},'/api/coach/history':{GET:history.GET},'/api/coach/apply':{POST:apply.POST},'/api/export':{GET:backup.GET},
+   '/api/workout':{GET:workout.GET,POST:workout.POST},'/api/coach':{GET:coach.GET,POST:coach.POST},'/api/export':{GET:backup.GET},
   };
   if(routes[path]){const fn=routes[path][r.method];return fn?fn(r):new Response(null,{status:405});}
   if(path.startsWith('/api/'))return json({error:'Not found'},404);
   await browserOwner(r);
   if(!env.ASSETS)throw new ApiError(503,'App assets are not configured.');
-  return env.ASSETS.fetch(r);
+  const asset=await env.ASSETS.fetch(r);const headers=new Headers(asset.headers);headers.set('Cache-Control','no-store, private');return new Response(asset.body,{status:asset.status,headers});
  }catch(e){if(e instanceof ApiError){if(e.status===401&&!path.startsWith('/api/'))return new Response(null,{status:303,headers:{Location:'/login'}});return json({error:e.message},e.status);}console.error('Setwise request failed');return json({error:'Request failed. Please retry.'},503);}
 }};

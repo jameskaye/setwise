@@ -1,5 +1,7 @@
 # Setwise MCP connection status
 
+**Superseded September 9, 2026:** The user stopped MCP, plugins, and GPT Actions work. The deployed Worker now serves the mobile tracker and `/api/coach`; `/mcp` and OAuth routes are disabled. See [MOBILE-STATUS.md](MOBILE-STATUS.md). Everything below is historical.
+
 ## Update: 2026-09-08 Cloudflare test deployment
 
 Worker `setwise-test` is deployed at https://setwise-test.setwise-jlk298.workers.dev with MCP at `/mcp`.

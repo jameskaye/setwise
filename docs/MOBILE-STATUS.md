@@ -1,10 +1,10 @@
 # Setwise mobile tracker
 
-Updated September 9, 2026. This supersedes the MCP, plugin, and GPT Actions deployment plans.
+Updated September 10, 2026. This supersedes the MCP, plugin, and GPT Actions deployment plans. The new rep-out program is described in [RTF-PROGRESSION.md](RTF-PROGRESSION.md) and the update below; the earlier coach workflow applies only when no structured program is configured.
 
 Test site: https://setwise-test.setwise-jlk298.workers.dev
 
-Deployment: `73cc1a3dcd60441897f92cc27b824054`. D1 migration `0003_mobile_coach.sql` is applied.
+Deployment: `b46e2f47c25c480bacbc9215c4cf7bd0`. D1 migration `0003_mobile_coach.sql` is applied; the rep-out update needs no schema migration.
 
 The standalone entry is `standalone/worker.ts`. Cloudflare D1 is the source of truth for workouts, sets, history, progression, routines, and coach proposals. `/mcp` and OAuth endpoints return 404. No ChatGPT app installation is required.
 
@@ -35,3 +35,8 @@ Current adjustments retain pre-existing session constraints and pain pauses; a f
 ## Data boundary
 
 Only the separate `setwise-test` D1 database has been used. The original private Site and real workout history are untouched. Do not migrate real history until the user confirms the iPhone experience passes.
+# Rep-out program update — 2026-09-10
+
+The test Worker now runs deterministic SBS-style rep-out progression. Personal routine revision 3 uses the supplied workbook's formulas and deloads, with the existing four-day exercise lineup and set counts. RIR is not required in programmed sessions. Single-leg RDL and calf work use controlled recovery prescriptions. See [RTF-PROGRESSION.md](RTF-PROGRESSION.md) for formulas, adaptations, persistence, and verification.
+
+Deployment: `b46e2f47c25c480bacbc9215c4cf7bd0`. Browser sign-in and OpenRouter secret bindings were inherited. Coach is configured but advice-only while this structured program is active. The old empty “Upper body — test” session remains current; finish it and start Upper A to enter week one. No real history was migrated.

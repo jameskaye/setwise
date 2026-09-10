@@ -76,5 +76,36 @@ test('mobile auth, deterministic logging, validated coach proposals, apply/retry
   sql.prepare("INSERT INTO coach_requests(owner,id,created_at,message,status) VALUES (?,?,?,?,?)").run('test-owner','rate-limit',Date.now(),'test','failed');
   while(sql.prepare('SELECT count(*) n FROM coach_requests').get().n<10)sql.prepare("INSERT INTO coach_requests(owner,id,created_at,message,status) VALUES (?,?,?,?,?)").run('test-owner',crypto.randomUUID(),Date.now(),'test','failed');
   assert.equal((await propose('Rate limited')).status,429);
+  // The program is stored through the authenticated API and survives new snapshots.
+  data=await read();const active=data.sessions.find(s=>s.status==='active');
+  const programRoutine={name:'RTF API test',notes:'',constraints:[],program:{id:'rtf-api-cycle',lifts:['a','b'].map(workoutId=>({workoutId,variantId:variant.id,profile:'main',trainingMax:100}))},workouts:['a','b'].map(id=>({id,name:id,notes:'',timeLimitMinutes:null,exercises:[{variantId:variant.id,minReps:5,maxReps:5,sets:2,targetRir:0}]}))};
+  const save={action:'save_routine',requestId:'rtf-api-save',expectedRevision:1,reason:'test program',routine:programRoutine};
+  assert.equal((await post(save)).status,200);assert.equal((await post(save)).status,200);
+  assert.equal((await post({action:'finish',sessionId:active.id})).status,200);
+  const begin=workoutId=>post({action:'start',id:crypto.randomUUID(),name:workoutId,plan:[variant.id],workoutId,expectedRoutineRevision:2});
+  assert.equal((await begin('a')).status,200);data=await read();let programmed=data.sessions.find(s=>s.status==='active');
+  assert.equal(programmed.rules.program.week,1);assert.equal(programmed.rules.program.lifts[0].weight.left,70);
+  let last;
+  for(const side of ['left','right'])for(let i=0;i<2;i++){
+   last={...logged,id:crypto.randomUUID(),sessionId:programmed.id,weight:70,reps:i===0?5:side==='left'?12:9,rir:null,side};
+   assert.equal((await post(last)).status,200);
+  }
+  assert.equal((await post(last)).status,200,'lost response retry has no duplicate');
+  assert.equal((await post({action:'undo',setId:last.id,sessionId:programmed.id})).status,200);
+  assert.equal((await post(last)).status,200);
+  assert.equal((await post({action:'finish',sessionId:programmed.id})).status,200);
+  assert.equal((await post({action:'finish',sessionId:programmed.id})).status,200,'finish retry advances once');
+  assert.equal((await post(last)).status,200,'saved set can be acknowledged after finish');
+  assert.equal((await begin('a')).status,400,'cannot jump ahead of remaining week-one workout');
+  assert.equal((await begin('b')).status,200);data=await read();programmed=data.sessions.find(s=>s.status==='active');
+  assert.equal((await post({action:'finish',sessionId:programmed.id})).status,200);
+  assert.equal((await begin('b')).status,200);data=await read();programmed=data.sessions.find(s=>s.status==='active');
+  assert.equal(programmed.rules.program.week,1,'empty session does not advance week');
+  assert.equal((await post({...logged,id:crypto.randomUUID(),sessionId:programmed.id,weight:70,reps:5,rir:null})).status,200);
+  assert.equal((await post({action:'finish',sessionId:programmed.id})).status,200);
+  assert.equal((await begin('a')).status,200);data=await read();programmed=data.sessions.find(s=>s.status==='active');
+  assert.equal(programmed.rules.program.week,2);
+  assert.equal(programmed.rules.program.lifts[0].trainingMax.left,101);
+  assert.equal(programmed.rules.program.lifts[0].trainingMax.right,98);
  }finally{globalThis.fetch=originalFetch;sql.close();rmSync(temp,{recursive:true,force:true});}
 });

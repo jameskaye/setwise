@@ -1,13 +1,16 @@
 import {z} from 'zod';
 import {browserOwner,sameOrigin} from '@/lib/server-auth';
-import {ApiError,latestRoutine} from '@/db/routine-store';
+import {ApiError,latestRoutine,saveRoutine} from '@/db/routine-store';
+import {saveRoutineSchema} from '@/lib/routine';
+import {buildProgramSession,programWeek,nextProgramWorkout} from '@/lib/rtf';
 import {database,query,initialize,snapshot} from '@/db/store';
 import {interpretCoach,recommend} from '@/lib/coach';
 import type {LoggedSet} from '@/lib/model';
 export const dynamic='force-dynamic';
 const id=z.string().min(1).max(180), num=z.number().finite();
 export const actionSchema=z.discriminatedUnion('action',[
- z.object({action:z.literal('log'),id:id,sessionId:id,variantId:id,weight:num.min(0).max(2000),reps:num.int().min(1).max(100),rir:num.int().min(0).max(3),side:z.enum(['left','right','both']),type:z.enum(['working','warmup','backoff','drop']),painLocation:z.string().max(100),painSeverity:num.int().min(0).max(10),note:z.string().max(1000)}),
+ z.object({action:z.literal('log'),id:id,sessionId:id,variantId:id,weight:num.min(0).max(2000),reps:num.int().min(0).max(100),rir:num.int().min(0).max(3).nullable(),side:z.enum(['left','right','both']),type:z.enum(['working','warmup','backoff','drop']),painLocation:z.string().max(100),painSeverity:num.int().min(0).max(10),note:z.string().max(1000)}),
+ saveRoutineSchema.extend({action:z.literal('save_routine')}),
  z.object({action:z.literal('undo'),setId:id,sessionId:id}),
  z.object({action:z.literal('finish'),sessionId:id}),
  z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30),workoutId:id.optional(),expectedRoutineRevision:z.number().int().min(0).optional()}),
@@ -28,6 +31,12 @@ export async function POST(r:Request){try{
 export async function performWorkout(owner:string,input:unknown){try{
   const a=actionSchema.parse(input),state=await snapshot(owner),now=Date.now();
   const session='sessionId' in a?state.sessions.find(s=>s.id===a.sessionId):undefined;
+  if(a.action==='finish'&&session?.status==='finished')return reply(state);
+  if(a.action==='log'&&state.sets.some(s=>s.id===a.id)){
+    const existing=state.sets.find(s=>s.id===a.id)!;
+    if(Object.entries(a).some(([key,value])=>key!=='action'&&existing[key as keyof LoggedSet]!==value))throw new ApiError(409,'Set ID was already used for a different set.');
+    return reply(state);
+  }
   if('sessionId' in a && (!session||session.status!=='active'))throw new InputError('This workout has finished. Reload or start another workout.');
   if('variantId' in a && !state.variants.some(v=>v.id===a.variantId))throw new InputError('Exercise variant not found.');
   if('plan' in a && (new Set(a.plan).size!==a.plan.length || a.plan.some(id=>!state.variants.some(v=>v.id===id))))throw new InputError('Choose valid, distinct exercises.');
@@ -39,27 +48,42 @@ export async function performWorkout(owner:string,input:unknown){try{
     if(a.painSeverity>0 && !a.painLocation.trim())throw new InputError('Choose or enter where you felt pain.');
     const before=recommend(v,session!,state.sets,a.side,a.type,now);
     if(before.status==='pause'||before.status==='complete')throw new InputError(before.reason);
+    if(a.reps===0&&!before.repOut)throw new InputError('Zero reps can only be recorded on the final rep-out set.');
+    if(before.program&&a.weight===0&&session!.rules.program?.lifts.find(l=>l.variantId===v.id)?.intensity)throw new InputError('Choose a positive working weight for this lift.');
     const set:LoggedSet={...a,createdAt:Math.max(now,...state.sets.filter(s=>s.sessionId===session!.id).map(s=>s.createdAt+1)),suggestedWeight:before.weight,suggestedReps:before.reps};
     const next=recommend(v,session!,[...state.sets,set],a.side,'working',now);
-    await database().batch([
-      query('INSERT OR IGNORE INTO sets (id,owner,session_id,variant_id,created_at,weight,reps,rir,side,type,pain_location,pain_severity,note,suggested_weight,suggested_reps) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',a.id,owner,a.sessionId,a.variantId,set.createdAt,a.weight,a.reps,a.rir,a.side,a.type,a.painLocation,a.painSeverity,a.note,before.weight,before.reps),
-      query('INSERT OR IGNORE INTO progressions (id,owner,session_id,set_id,variant_id,created_at,recommendation) VALUES (?,?,?,?,?,?,?)',a.id+'-next',owner,a.sessionId,a.id,a.variantId,set.createdAt,JSON.stringify(next))
+    const result=await database().batch([
+      query("INSERT OR IGNORE INTO sets (id,owner,session_id,variant_id,created_at,weight,reps,rir,side,type,pain_location,pain_severity,note,suggested_weight,suggested_reps) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ? AND owner = ? AND status = 'active' AND rules = ?) AND (SELECT COUNT(*) FROM sets WHERE session_id = ? AND owner = ?) = ?",a.id,owner,a.sessionId,a.variantId,set.createdAt,a.weight,a.reps,a.rir,a.side,a.type,a.painLocation,a.painSeverity,a.note,before.weight,before.reps,a.sessionId,owner,JSON.stringify(session!.rules),a.sessionId,owner,state.sets.filter(s=>s.sessionId===a.sessionId).length),
+      query('INSERT OR IGNORE INTO progressions (id,owner,session_id,set_id,variant_id,created_at,recommendation) SELECT ?,?,?,?,?,?,? WHERE changes() > 0',a.id+'-next',owner,a.sessionId,a.id,a.variantId,set.createdAt,JSON.stringify(next))
     ]);
+    if(!result[0].meta.changes)throw new ApiError(409,'Workout changed while saving. Reload and retry the same set.');
   } else if(a.action==='undo'){
     const latest=state.sets.filter(s=>s.sessionId===a.sessionId).sort((a,b)=>b.createdAt-a.createdAt)[0];
     if(!latest||latest.id!==a.setId)throw new InputError('Only the latest set in this workout can be undone.');
     await database().batch([query('DELETE FROM progressions WHERE owner = ? AND set_id = ?',owner,a.setId),query('DELETE FROM sets WHERE owner = ? AND id = ? AND session_id = ?',owner,a.setId,a.sessionId)]);
-  } else if(a.action==='finish'){await query('UPDATE sessions SET status = ?, ended_at = ? WHERE id = ? AND owner = ?', 'finished',now,a.sessionId,owner).run();}
+  } else if(a.action==='finish'){
+    const rules={...session!.rules};
+    if(rules.program)rules.program={...rules.program,advance:state.sets.some(s=>s.sessionId===a.sessionId&&s.type==='working')};
+    const result=await query("UPDATE sessions SET status = ?, ended_at = ?, rules = ? WHERE id = ? AND owner = ? AND status = 'active' AND rules = ? AND (SELECT COUNT(*) FROM sets WHERE session_id = ? AND owner = ?) = ?",'finished',now,JSON.stringify(rules),a.sessionId,owner,JSON.stringify(session!.rules),a.sessionId,owner,state.sets.filter(s=>s.sessionId===a.sessionId).length).run();
+    if(!result.meta.changes)throw new ApiError(409,'Workout changed while finishing. Reload and finish again.');
+  }
   else if(a.action==='start'){
     if(state.sessions.some(s=>s.status==='active'))return reply(state);
     const saved=await latestRoutine(owner);
     if(saved&&a.expectedRoutineRevision!==saved.revision)throw new ApiError(409,'Your routine changed. Reload before starting.');
     const template=saved?.routine.workouts.find(w=>w.id===a.workoutId);
     if(saved&&!template)throw new InputError('Choose a workout from your saved routine.');
-    const rules=template?.timeLimitMinutes?{deadline:now+template.timeLimitMinutes*60000}:{};
+    if(saved?.routine.program&&template&&programWeek(saved.routine,template.id,state.sessions)>programWeek(saved.routine,nextProgramWorkout(saved.routine,state.sessions).id,state.sessions))throw new InputError('Finish the remaining workouts in this program week first.');
+    if(saved?.routine.program&&template&&programWeek(saved.routine,template.id,state.sessions)>21)throw new InputError('You completed this 21-week cycle. Set up your next cycle before starting.');
+    const program=template&&saved?buildProgramSession(saved.routine,template.id,state):undefined;
+    const rules={...(template?.timeLimitMinutes?{deadline:now+template.timeLimitMinutes*60000}:{}),...(program?{program}:{})};
     const context=template?[template.notes,saved!.routine.notes,...saved!.routine.constraints].filter(Boolean).join('\n'):'';
     await query('INSERT OR IGNORE INTO sessions (id,owner,name,started_at,ended_at,status,notes,plan,rules,prescriptions,routine_revision) VALUES (?,?,?,?,?,?,?,?,?,?,?)',a.id,owner,template?.name??a.name,now,null,'active',context,JSON.stringify(template?.exercises.map(e=>e.variantId)??a.plan),JSON.stringify(rules),JSON.stringify(template?.exercises??[]),saved?.revision??null).run();
-  } else if(a.action==='session'){await query('UPDATE sessions SET name = ?, notes = ?, plan = ? WHERE id = ? AND owner = ?',a.name,a.notes,JSON.stringify(a.plan),a.sessionId,owner).run();}
+  } else if(a.action==='save_routine'){
+    const {action,...input}=a;await saveRoutine(owner,input,state);
+  } else if(a.action==='session'){
+    if(session!.rules.program&&JSON.stringify(a.plan)!==JSON.stringify(session!.plan))throw new InputError('Keep the programmed lineup for this workout. Update the saved routine for future sessions.');
+    await query('UPDATE sessions SET name = ?, notes = ?, plan = ? WHERE id = ? AND owner = ?',a.name,a.notes,JSON.stringify(a.plan),a.sessionId,owner).run();}
   else if(a.action==='coach'){
     if(state.messages.some(m=>m.id===a.id))return reply(state);
     const result=interpretCoach(a.message,session!.rules,state.variants,a.variantId,now);

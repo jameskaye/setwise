@@ -1,5 +1,6 @@
 import type {Variant, Session, LoggedSet, Side, SetType, Recommendation, Rules} from './model';
 import {sessionVariant} from './routine';
+import {programRecommendation} from './rtf';
 const clamp=(n:number,min:number,max:number)=>Math.max(min,Math.min(max,n));
 const sameSide=(s:LoggedSet,side:Side)=>s.side===side || s.side==='unknown';
 export function recommend(v:Variant, session:Session, all:LoggedSet[], side:Side, type:SetType='working', now=Date.now()):Recommendation {
@@ -15,6 +16,8 @@ export function recommend(v:Variant, session:Session, all:LoggedSet[], side:Side
   if(rules.skipped?.includes(v.id)) return {...base,status:'pause',label:'Exercise skipped',reason:'Your workout constraint pauses this exercise. Choose another exercise or update the constraint.'};
   if(current.some(s=>s.painSeverity>0)) return {...base,status:'pause',label:'Pause this exercise',reason:'Pain was logged on this side. Switch exercises; do not push through pain.'};
   if(rules.deadline && now>=rules.deadline) return {...base,status:'complete',label:'Time is up',reason:'You reached your workout time limit. Finish the session or update the limit.'};
+  const programmed=programRecommendation(v,session,all,side,type);
+  if(programmed)return programmed;
   if(type!=='warmup' && (type==='working'||rules.maxSets!==undefined) && work.length>=(rules.maxSets??v.defaultSets)) return {...base,weight:last?.weight??null,reps:clamp(last?.reps??min,min,max),status:'complete',label:'Target complete',reason:`${work.length} sets logged${v.unilateral?' on this side':''}. ${rules.maxSets!==undefined?'Your coach set limit is reached.':'Move on, or deliberately add a backoff or drop set.'}`};
   if(!last) return {...base,status:'calibrate',label:'Find your starting weight',reason:`No working-set history for this variant. Pick a familiar light load for ${min}–${max} reps with ${targetRir}+ reps left.`};
   const step=v.increment;
@@ -42,7 +45,7 @@ export function recommend(v:Variant, session:Session, all:LoggedSet[], side:Side
 }
 export function interpretCoach(message:string, old:Rules, variants:Variant[], selectedId:string, now=Date.now()):{rules:Rules;response:string} {
   const t=message.toLowerCase().replace(/[’]/g,"'"); const rules={...old,skipped:[...(old.skipped??[])]}; const changes:string[]=[];
-  if(/\b(reset|clear) (coach|constraints|rules)\b/.test(t)) return {rules:{},response:'Coaching constraints cleared. Exercise defaults apply again; your notes and sets are preserved.'};
+  if(/\b(reset|clear) (coach|constraints|rules)\b/.test(t)) return {rules:old.program?{program:old.program}:{},response:'Coaching constraints cleared. Your saved program, notes, and sets are preserved.'};
   if(/\b(tired|fatigued|exhausted|lighter|take it easy|easy mode|deload)\b/.test(t) && !/\b(not tired|not fatigued|don't go lighter|do not go lighter)\b/.test(t)){if(!rules.easy)rules.easySince=now;rules.easy=true;rules.targetRir=3;changes.push('Use conservative loads and keep 3+ reps in reserve for the rest of this workout.');}
   if(/\b(no failure|avoid failure|don't (?:go to|train to) failure)\b/.test(t)){rules.targetRir=Math.max(rules.targetRir??2,2);changes.push('Keep at least 2 reps in reserve.');}
   const rir=t.match(/(?:leave|keep|target)\s+([0-3])\s*(?:rir|reps? (?:in reserve|left))/);if(rir){rules.targetRir=Number(rir[1]);changes.push(`Target ${rir[1]}${rir[1]==='3'?'+':''} reps in reserve.`);}

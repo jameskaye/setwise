@@ -8,7 +8,7 @@ export interface LoggedSet {id:string; sessionId:string; variantId:string; creat
 export interface Recommendation {program?:boolean;repOut?:boolean;weight:number|null; reps:number; min:number; max:number; targetRir:number; reason:string; status:'ready'|'calibrate'|'complete'|'pause'; label:string;}
 export interface CoachMessage {id:string; sessionId:string; createdAt:number; message:string; response:string; requestPayload?:string|null;}
 export interface Progression {id:string; sessionId:string; setId:string; variantId:string; createdAt:number; recommendation:Recommendation;}
-export interface Snapshot {exercises:Exercise[]; variants:Variant[]; sessions:Session[]; sets:LoggedSet[]; messages:CoachMessage[]; progressions:Progression[]; routine?:import('./routine').RoutineRevision|null;}
+export interface Snapshot {account?:{id:string;name:string;canInvite:boolean};exercises:Exercise[]; variants:Variant[]; sessions:Session[]; sets:LoggedSet[]; messages:CoachMessage[]; progressions:Progression[]; routine?:import('./routine').RoutineRevision|null;}
 export const starterExercises = [
   {key:'extension',base:'Leg extension',name:'Single-leg leg extension',equipment:'Leg extension machine',unilateral:1,loadMode:'per leg',increment:5,minReps:8,maxReps:12,defaultSets:3},
   {key:'press',base:'Leg press',name:'Leg press',equipment:'Leg press machine',unilateral:0,loadMode:'machine load',increment:10,minReps:10,maxReps:15,defaultSets:3},

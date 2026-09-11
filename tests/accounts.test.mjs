@@ -1,0 +1,55 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHmac} from 'node:crypto';
+import {accountHarness} from './account-harness.mjs';
+test('private accounts preserve the owner, isolate workouts and revoke replaced partner credentials',async()=>{
+ const h=await accountHarness();try{
+ const {call,login,sql}=h;
+ const owner=(await login(h.loginKey)).headers.get('set-cookie').split(';')[0];
+ let state=await (await call('/api/workout',owner)).json();const variant=state.variants[0];
+ const start={action:'start',id:'original-session',name:'Existing workout',plan:[variant.id]};assert.equal((await call('/api/workout',owner,start)).status,200);
+ const set={action:'log',id:'original-set',sessionId:start.id,variantId:variant.id,weight:105,reps:10,rir:2,side:'left',type:'working',painLocation:'',painSeverity:0,note:'Private owner note'};
+ assert.equal((await call('/api/workout',owner,set)).status,200);
+ const before=await (await call('/api/export',owner)).json();
+ // The old expiry-only cookie must continue to represent only the original account.
+ const expiry=String(Date.now()+86400000),legacy='__Host-setwise='+expiry+'.'+createHmac('sha256',h.secret).update(expiry).digest('hex');
+ assert.equal((await (await call('/api/workout',legacy)).json()).sets[0].id,set.id);
+ assert.equal((await call('/api/account','',{action:'create_partner',name:'Partner'})).status,401);
+ assert.equal((await call('/api/account',owner,{action:'create_partner',name:'Partner'},{Origin:'https://evil.test'})).status,403);
+ const created=await call('/api/account',owner,{action:'create_partner',name:'Partner'});assert.equal(created.status,200);const {key}=await created.json();assert.match(key,/^[a-f0-9]{64}$/);
+ assert.equal((await call('/api/account',owner,{action:'create_partner',name:'Duplicate'})).status,409);
+ assert.equal(sql.prepare('SELECT count(*) AS n FROM private_accounts').get().n,1);
+ assert.notEqual(sql.prepare('SELECT key_hash FROM private_accounts').get().key_hash,key);
+ const member=(await login(key)).headers.get('set-cookie').split(';')[0];assert.notEqual(member,owner);
+ const fresh=await (await call('/api/workout',member)).json();assert.equal(fresh.account.name,'Partner');assert.equal(fresh.account.canInvite,false);assert.equal(fresh.sessions.length,0);assert.equal(fresh.sets.length,0);assert.equal(fresh.routine,null);assert.equal(fresh.messages.length,0);
+ assert.ok(fresh.variants.every(v=>!before.data.variants.some(o=>o.id===v.id)));
+ assert.equal((await call('/api/workout',member,undefined,{'X-Setwise-Account':'original-owner'})).status,409,'a stale tab cannot act as the newly signed-in account');
+ assert.throws(()=>sql.prepare('INSERT INTO variants SELECT ?,?,exercise_id,name,equipment,unilateral,load_mode,increment,min_reps,max_reps,default_sets FROM variants WHERE id = ?').run('cross-owner',fresh.account.id,variant.id),/ownership mismatch/,'database enforces ownership even during an ID race');
+ assert.equal((await call('/api/account',member,{action:'create_partner',name:'Unauthorized'})).status,403);
+ assert.equal((await call('/api/account',member,{action:'reset_partner_key',expectedVersion:1})).status,403);
+ assert.equal((await call('/api/workout',member,{...set,id:'stolen'})).status,400);
+ assert.equal((await call('/api/workout',member,{action:'undo',setId:set.id,sessionId:start.id})).status,400);
+ assert.equal((await call('/api/workout',member,{...start,plan:[fresh.variants[0].id]})).status,409);
+ assert.equal((await call('/api/workout',member,{action:'targets',variantId:variant.id,increment:20,minReps:1,maxReps:5,defaultSets:1})).status,400);
+ const mv=fresh.variants.find(v=>v.id.endsWith('-bench'));
+ const routine={name:'Partner plan',notes:'',constraints:[],workouts:[{id:'a',name:'Partner A',notes:'',timeLimitMinutes:null,exercises:[{variantId:mv.id,minReps:5,maxReps:5,sets:2,targetRir:0}]}],program:{id:'partner-cycle',lifts:[{workoutId:'a',variantId:mv.id,profile:'main',trainingMax:100}]}};
+ const save={action:'save_routine',requestId:'save-partner',expectedRevision:0,reason:'My setup',routine};
+ assert.equal((await call('/api/workout',owner,save)).status,400,'cannot import partner IDs into owner plan');
+ assert.equal((await call('/api/workout',member,save)).status,200);
+ assert.equal((await call('/api/workout',member,{action:'start',id:'member-session',name:'A',plan:[mv.id],workoutId:'a',expectedRoutineRevision:1})).status,200);
+ state=await (await call('/api/workout',member)).json();assert.equal(state.sessions[0].rules.program.lifts[0].weight.both,70);
+ const memberSet={...set,id:'member-set',sessionId:'member-session',variantId:mv.id,weight:70,reps:5,side:'both',rir:null,note:''};
+ assert.equal((await call('/api/workout',member,memberSet)).status,200);
+ assert.equal((await call('/api/workout',member,{...memberSet,id:'member-repout',reps:12})).status,200);
+ assert.equal((await call('/api/workout',member,{action:'finish',sessionId:'member-session'})).status,200);
+ assert.equal((await call('/api/workout',member,{action:'start',id:'member-week2',name:'A',plan:[mv.id],workoutId:'a',expectedRoutineRevision:1})).status,200);
+ state=await (await call('/api/workout',member)).json();const next=state.sessions.find(s=>s.status==='active').rules.program;assert.equal(next.week,2);assert.equal(next.lifts[0].trainingMax.both,101);
+ const exported=await (await call('/api/export',member)).json();assert.ok(exported.data.sets.every(s=>s.id!==set.id));assert.equal(JSON.stringify(exported).includes('Private owner note'),false);
+ assert.equal((await (await call('/api/coach',member)).json()).proposals.length,0);
+ assert.equal((await call('/api/workout',member.replace(/member-[^.]+/,'original-owner'))).status,401,'owner in cookie cannot be forged');
+ const replaced=await call('/api/account',owner,{action:'reset_partner_key',expectedVersion:1});assert.equal(replaced.status,200);const newKey=(await replaced.json()).key;
+ assert.equal((await login(key)).status,401);assert.equal((await call('/api/workout',member)).status,401);assert.equal((await call('/api/account',owner,{action:'reset_partner_key',expectedVersion:1})).status,409);
+ const newCookie=(await login(newKey)).headers.get('set-cookie').split(';')[0];assert.equal((await (await call('/api/workout',newCookie)).json()).sets.length,2);
+ const after=await (await call('/api/export',owner)).json();assert.deepEqual(after.data,before.data);assert.deepEqual(after.revisions,before.revisions);
+ }finally{h.close();}
+});

@@ -40,3 +40,7 @@ Only the separate `setwise-test` D1 database has been used. The original private
 The test Worker now runs deterministic SBS-style rep-out progression. Personal routine revision 3 uses the supplied workbook's formulas and deloads, with the existing four-day exercise lineup and set counts. RIR is not required in programmed sessions. Single-leg RDL and calf work use controlled recovery prescriptions. See [RTF-PROGRESSION.md](RTF-PROGRESSION.md) for formulas, adaptations, persistence, and verification.
 
 Deployment: `b46e2f47c25c480bacbc9215c4cf7bd0`. Browser sign-in and OpenRouter secret bindings were inherited. Coach is configured but advice-only while this structured program is active. The old empty “Upper body — test” session remains current; finish it and start Upper A to enter week one. No real history was migrated.
+
+## Private partner accounts — 2026-09-11
+
+Deployed `99f248a82e794d96b1782c93b2285d35`. Account → Create partner access gives the partner a separate key and empty workout history. Plan now includes a personal starter/editor and reviewed program-file import for ChatGPT changes. See [PRIVATE-ACCOUNTS.md](PRIVATE-ACCOUNTS.md) for use and verification. Live sign-in and screens passed iPhone WebKit checks; original workout data and revision 4 matched the pre-deployment export. No original Sites history was imported.

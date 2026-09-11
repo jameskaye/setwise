@@ -31,6 +31,10 @@ export async function POST(r:Request){try{
 }catch(e){return errorReply(e);}}
 export async function performWorkout(owner:string,input:unknown){try{
   const a=actionSchema.parse(input),state=await snapshot(owner),now=Date.now();
+  // Reject cross-account collisions in client-supplied globally keyed IDs.
+  const table=a.action==='start'?'sessions':a.action==='variant'?'variants':a.action==='coach'?'coach_messages':null;
+  if(table&&'id' in a){const row=await query(`SELECT owner FROM ${table} WHERE id = ?`,a.id).first();if(row&&row.owner!==owner)throw new ApiError(409,'Identifier unavailable. Retry with a new identifier.');}
+  if(a.action==='variant'&&!a.exerciseId){const row=await query('SELECT owner FROM exercises WHERE id = ?',a.id+'-base').first();if(row&&row.owner!==owner)throw new ApiError(409,'Identifier unavailable. Retry with a new identifier.');}
   const session='sessionId' in a?state.sessions.find(s=>s.id===a.sessionId):undefined;
   if(a.action==='finish'&&session?.status==='finished')return reply(state);
   if(a.action==='log'&&state.sets.some(s=>s.id===a.id)){

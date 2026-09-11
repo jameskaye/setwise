@@ -65,16 +65,16 @@ await build({entryPoints:['app/api/workout/route.ts'],bundle:true,platform:'node
 const {GET,POST}=await import(pathToFileURL(join(temp,'route.mjs')));
 const req=(body,owner='james')=>new Request('https://example.com/api/workout',{method:body?'POST':'GET',headers:{'oai-authenticated-user-id':owner,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
 const send=async b=>{const r=await POST(req(b));return{status:r.status,data:await r.json()};};
-test('database workflow: seed once, save/reopen, idempotent retry, ownership, finish',async()=>{
+test('database workflow: clean account, save/reopen, idempotent retry, ownership, finish',async()=>{
  assert.equal((await GET(new Request('https://example.com/api/workout'))).status,401);
- let d=await (await GET(req())).json();assert.equal(d.sets.length,1);assert.equal(d.sets[0].weight,95);assert.equal(d.sets[0].createdAt,0);
- d=await (await GET(req())).json();assert.equal(d.sets.length,1);assert.equal(d.variants.length,10);
+ let d=await (await GET(req())).json();assert.equal(d.sets.length,0);assert.equal(d.sessions.length,0);
+ d=await (await GET(req())).json();assert.equal(d.sets.length,0);assert.equal(d.variants.length,10);d=(await send({action:'start',id:'first-session',name:'Test',plan:d.variants.slice(0,5).map(v=>v.id)})).data;
  const active=d.sessions.find(s=>s.status==='active'),variant=d.variants.find(v=>v.name==='Single-leg leg extension');
  const payload={action:'log',id:'one',sessionId:active.id,variantId:variant.id,weight:95,reps:12,rir:2,side:'left',type:'working',painLocation:'',painSeverity:0,note:''};
- let result=await send(payload);assert.equal(result.status,200);assert.equal(result.data.sets.length,2);assert.equal(result.data.progressions[0].recommendation.weight,100);
- result=await send(payload);assert.equal(result.status,200);assert.equal(result.data.sets.length,2);assert.equal(result.data.progressions.length,1);
- sql.close();openDb();d=await (await GET(req())).json();assert.equal(d.sets.length,2);
- const other=await (await GET(req(undefined,'other-user'))).json();assert.equal(other.sets.length,1);assert.notEqual(other.sets[0].id,d.sets[0].id);
+ let result=await send(payload);assert.equal(result.status,200);assert.equal(result.data.sets.length,1);assert.equal(result.data.progressions[0].recommendation.weight,100);
+ result=await send(payload);assert.equal(result.status,200);assert.equal(result.data.sets.length,1);assert.equal(result.data.progressions.length,1);
+ sql.close();openDb();d=await (await GET(req())).json();assert.equal(d.sets.length,1);
+ const other=await (await GET(req(undefined,'other-user'))).json();assert.equal(other.sets.length,0);assert.notEqual(other.variants[0].id,d.variants[0].id);
  const denied=await POST(req({...payload,id:'theft'},'other-user'));assert.equal(denied.status,400);
  result=await send({...payload,id:'pain',side:'right',painLocation:'right knee',painSeverity:2});assert.equal(result.status,200);
  result=await send({...payload,id:'pain2',side:'right'});assert.equal(result.status,400);

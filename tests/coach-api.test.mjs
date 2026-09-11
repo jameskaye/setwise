@@ -34,7 +34,7 @@ test('mobile auth, deterministic logging, validated coach proposals, apply/retry
   const coach=body=>call('/api/coach',{method:'POST',headers,body});
   const read=async()=> (await call('/api/workout',{headers})).json();
   const propose=message=>coach({action:'propose',requestId:crypto.randomUUID(),message});
-  let data=await read(),session=data.sessions.find(s=>s.status==='active'),variant=data.variants.find(v=>v.id===session.plan[0]);
+  let data=await read();assert.equal(data.sets.length,0);assert.equal(data.sessions.length,0);await post({action:'start',id:crypto.randomUUID(),name:'Test workout',plan:data.variants.slice(0,5).map(v=>v.id)});data=await read();let session=data.sessions.find(s=>s.status==='active'),variant=data.variants.find(v=>v.id===session.plan[0]);
   assert.equal((await (await call('/api/coach',{headers})).json()).configured,false);
   assert.equal((await propose('Two sets today')).status,503);
   const logged={action:'log',id:crypto.randomUUID(),sessionId:session.id,variantId:variant.id,weight:95,reps:10,rir:2,side:'left',type:'working',painLocation:'',painSeverity:0,note:'Test set'};

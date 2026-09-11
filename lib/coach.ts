@@ -45,7 +45,7 @@ export function recommend(v:Variant, session:Session, all:LoggedSet[], side:Side
 }
 export function interpretCoach(message:string, old:Rules, variants:Variant[], selectedId:string, now=Date.now()):{rules:Rules;response:string} {
   const t=message.toLowerCase().replace(/[’]/g,"'"); const rules={...old,skipped:[...(old.skipped??[])]}; const changes:string[]=[];
-  if(/\b(reset|clear) (coach|constraints|rules)\b/.test(t)) return {rules:old.program?{program:old.program}:{},response:'Coaching constraints cleared. Your saved program, notes, and sets are preserved.'};
+  if(/\b(reset|clear) (coach|constraints|rules)\b/.test(t)) return {rules:{...(old.program?{program:old.program}:{}),...(old.supersets?{supersets:old.supersets}:{})},response:'Coaching constraints cleared. Your saved program, pairings, notes, and sets are preserved.'};
   if(/\b(tired|fatigued|exhausted|lighter|take it easy|easy mode|deload)\b/.test(t) && !/\b(not tired|not fatigued|don't go lighter|do not go lighter)\b/.test(t)){if(!rules.easy)rules.easySince=now;rules.easy=true;rules.targetRir=3;changes.push('Use conservative loads and keep 3+ reps in reserve for the rest of this workout.');}
   if(/\b(no failure|avoid failure|don't (?:go to|train to) failure)\b/.test(t)){rules.targetRir=Math.max(rules.targetRir??2,2);changes.push('Keep at least 2 reps in reserve.');}
   const rir=t.match(/(?:leave|keep|target)\s+([0-3])\s*(?:rir|reps? (?:in reserve|left))/);if(rir){rules.targetRir=Number(rir[1]);changes.push(`Target ${rir[1]}${rir[1]==='3'?'+':''} reps in reserve.`);}

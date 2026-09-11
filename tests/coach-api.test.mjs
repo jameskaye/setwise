@@ -79,12 +79,22 @@ test('mobile auth, deterministic logging, validated coach proposals, apply/retry
   // The program is stored through the authenticated API and survives new snapshots.
   data=await read();const active=data.sessions.find(s=>s.status==='active');
   const programRoutine={name:'RTF API test',notes:'',constraints:[],program:{id:'rtf-api-cycle',lifts:['a','b'].map(workoutId=>({workoutId,variantId:variant.id,profile:'main',trainingMax:100}))},workouts:['a','b'].map(id=>({id,name:id,notes:'',timeLimitMinutes:null,exercises:[{variantId:variant.id,minReps:5,maxReps:5,sets:2,targetRir:0}]}))};
+  const buddy=data.variants.find(v=>v.id!==variant.id).id;
+  for(const w of programRoutine.workouts){w.exercises.push({variantId:buddy,minReps:8,maxReps:12,sets:2,targetRir:0});w.supersets=[[variant.id,buddy]];}
   const save={action:'save_routine',requestId:'rtf-api-save',expectedRevision:1,reason:'test program',routine:programRoutine};
   assert.equal((await post(save)).status,200);assert.equal((await post(save)).status,200);
   assert.equal((await post({action:'finish',sessionId:active.id})).status,200);
   const begin=workoutId=>post({action:'start',id:crypto.randomUUID(),name:workoutId,plan:[variant.id],workoutId,expectedRoutineRevision:2});
   assert.equal((await begin('a')).status,200);data=await read();let programmed=data.sessions.find(s=>s.status==='active');
   assert.equal(programmed.rules.program.week,1);assert.equal(programmed.rules.program.lifts[0].weight.left,70);
+  assert.deepEqual(programmed.rules.supersets,[[variant.id,buddy]],'saved pairings freeze into the active session');
+  const priorProgram=JSON.stringify(programmed.rules.program),priorSets=JSON.stringify(data.sets);
+  assert.equal((await post({action:'supersets',sessionId:programmed.id,supersets:[],expectedSupersets:[[variant.id,buddy]]})).status,200);
+  assert.equal((await post({action:'supersets',sessionId:programmed.id,supersets:[[variant.id,buddy]],expectedSupersets:[[variant.id,buddy]]})).status,409,'stale pairing update rejected');
+  assert.equal((await post({action:'supersets',sessionId:programmed.id,supersets:[[variant.id,variant.id]],expectedSupersets:[]})).status,400);
+  assert.equal((await post({action:'supersets',sessionId:programmed.id,supersets:[[variant.id,'foreign']],expectedSupersets:[]})).status,400);
+  assert.equal((await post({action:'supersets',sessionId:programmed.id,supersets:[[variant.id,buddy]],expectedSupersets:[]})).status,200);
+  data=await read();assert.equal(JSON.stringify(data.sessions.find(s=>s.id===programmed.id).rules.program),priorProgram);assert.equal(JSON.stringify(data.sets),priorSets);
   let last;
   for(const side of ['left','right'])for(let i=0;i<2;i++){
    last={...logged,id:crypto.randomUUID(),sessionId:programmed.id,weight:70,reps:i===0?5:side==='left'?12:9,rir:null,side};

@@ -3,6 +3,7 @@ import type {Session, Snapshot, Variant} from './model';
 
 export const identifier=z.string().min(1).max(180);
 const bounded=z.number().int().min(1).max(50);
+export const supersetsSchema=z.array(z.tuple([identifier,identifier])).max(10).refine(groups=>new Set(groups.flat()).size===groups.flat().length,'Each exercise can belong to only one superset');
 export const prescriptionSchema=z.object({
   variantId:identifier,minReps:bounded,maxReps:bounded,
   sets:z.number().int().min(1).max(10),targetRir:z.number().int().min(0).max(3),
@@ -11,7 +12,8 @@ export const workoutTemplateSchema=z.object({
   id:identifier,name:z.string().trim().min(1).max(80),notes:z.string().max(2000),
   timeLimitMinutes:z.number().int().min(5).max(180).nullable(),
   exercises:z.array(prescriptionSchema).min(1).max(20),
-}).strict().refine(w=>new Set(w.exercises.map(e=>e.variantId)).size===w.exercises.length,'Use distinct variants');
+  supersets:supersetsSchema.optional(),
+}).strict().refine(w=>new Set(w.exercises.map(e=>e.variantId)).size===w.exercises.length,'Use distinct variants').refine(w=>(w.supersets??[]).flat().every(id=>w.exercises.some(e=>e.variantId===id)),'Superset exercises must be in the workout');
 export const routineSchema=z.object({
   name:z.string().trim().min(1).max(80),notes:z.string().max(2000),
   constraints:z.array(z.string().trim().min(1).max(300)).max(15),

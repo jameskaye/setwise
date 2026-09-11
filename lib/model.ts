@@ -2,7 +2,7 @@ export type Side = 'left' | 'right' | 'both' | 'unknown';
 export type SetType = 'working' | 'warmup' | 'backoff' | 'drop';
 export interface Exercise {id:string; name:string;}
 export interface Variant {id:string; exerciseId:string; name:string; equipment:string; unilateral:number; loadMode:string; increment:number; minReps:number; maxReps:number; defaultSets:number;}
-export interface Rules {program?:import('./rtf').ProgramSession;easy?:boolean; easySince?:number; targetRir?:number; maxSets?:number; minReps?:number; maxReps?:number; skipped?:string[]; deadline?:number;}
+export interface Rules {supersets?:[string,string][];program?:import('./rtf').ProgramSession;easy?:boolean; easySince?:number; targetRir?:number; maxSets?:number; minReps?:number; maxReps?:number; skipped?:string[]; deadline?:number;}
 export interface Session {id:string; name:string; startedAt:number; endedAt:number|null; status:string; notes:string; plan:string[]; rules:Rules; prescriptions?:import('./routine').Prescription[]; routineRevision?:number|null;}
 export interface LoggedSet {id:string; sessionId:string; variantId:string; createdAt:number; weight:number; reps:number; rir:number|null; side:Side; type:SetType; painLocation:string; painSeverity:number; note:string; suggestedWeight:number|null; suggestedReps:number|null;}
 export interface Recommendation {program?:boolean;repOut?:boolean;weight:number|null; reps:number; min:number; max:number; targetRir:number; reason:string; status:'ready'|'calibrate'|'complete'|'pause'; label:string;}

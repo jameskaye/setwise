@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {browserOwner,sameOrigin} from '@/lib/server-auth';
 import {ApiError,latestRoutine,saveRoutine} from '@/db/routine-store';
-import {saveRoutineSchema} from '@/lib/routine';
+import {saveRoutineSchema,supersetsSchema} from '@/lib/routine';
 import {buildProgramSession,programWeek,nextProgramWorkout} from '@/lib/rtf';
 import {database,query,initialize,snapshot} from '@/db/store';
 import {interpretCoach,recommend} from '@/lib/coach';
@@ -11,6 +11,7 @@ const id=z.string().min(1).max(180), num=z.number().finite();
 export const actionSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('log'),id:id,sessionId:id,variantId:id,weight:num.min(0).max(2000),reps:num.int().min(0).max(100),rir:num.int().min(0).max(3).nullable(),side:z.enum(['left','right','both']),type:z.enum(['working','warmup','backoff','drop']),painLocation:z.string().max(100),painSeverity:num.int().min(0).max(10),note:z.string().max(1000)}),
  saveRoutineSchema.extend({action:z.literal('save_routine')}),
+ z.object({action:z.literal('supersets'),sessionId:id,supersets:supersetsSchema,expectedSupersets:supersetsSchema}),
  z.object({action:z.literal('undo'),setId:id,sessionId:id}),
  z.object({action:z.literal('finish'),sessionId:id}),
  z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30),workoutId:id.optional(),expectedRoutineRevision:z.number().int().min(0).optional()}),
@@ -76,9 +77,16 @@ export async function performWorkout(owner:string,input:unknown){try{
     if(saved?.routine.program&&template&&programWeek(saved.routine,template.id,state.sessions)>programWeek(saved.routine,nextProgramWorkout(saved.routine,state.sessions).id,state.sessions))throw new InputError('Finish the remaining workouts in this program week first.');
     if(saved?.routine.program&&template&&programWeek(saved.routine,template.id,state.sessions)>21)throw new InputError('You completed this 21-week cycle. Set up your next cycle before starting.');
     const program=template&&saved?buildProgramSession(saved.routine,template.id,state):undefined;
-    const rules={...(template?.timeLimitMinutes?{deadline:now+template.timeLimitMinutes*60000}:{}),...(program?{program}:{})};
+    const rules={...(template?.timeLimitMinutes?{deadline:now+template.timeLimitMinutes*60000}:{}),...(program?{program}:{}),...(template?.supersets?{supersets:template.supersets}:{})};
     const context=template?[template.notes,saved!.routine.notes,...saved!.routine.constraints].filter(Boolean).join('\n'):'';
     await query('INSERT OR IGNORE INTO sessions (id,owner,name,started_at,ended_at,status,notes,plan,rules,prescriptions,routine_revision) VALUES (?,?,?,?,?,?,?,?,?,?,?)',a.id,owner,template?.name??a.name,now,null,'active',context,JSON.stringify(template?.exercises.map(e=>e.variantId)??a.plan),JSON.stringify(rules),JSON.stringify(template?.exercises??[]),saved?.revision??null).run();
+  } else if(a.action==='supersets'){
+    if(a.supersets.flat().some(id=>!session!.plan.includes(id)))throw new InputError('Choose exercises in this workout.');
+    if(JSON.stringify(session!.rules.supersets??[])===JSON.stringify(a.supersets))return reply(state);
+    if(JSON.stringify(session!.rules.supersets??[])!==JSON.stringify(a.expectedSupersets))throw new ApiError(409,'Superset pairings changed. Reload before saving.');
+    const rules={...session!.rules,supersets:a.supersets};
+    const result=await query("UPDATE sessions SET rules = ? WHERE id = ? AND owner = ? AND status = 'active' AND rules = ?",JSON.stringify(rules),session!.id,owner,JSON.stringify(session!.rules)).run();
+    if(!result.meta.changes)throw new ApiError(409,'Workout changed. Reload before saving pairings.');
   } else if(a.action==='save_routine'){
     const {action,...input}=a;await saveRoutine(owner,input,state);
   } else if(a.action==='session'){

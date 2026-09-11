@@ -4,7 +4,7 @@ Updated September 10, 2026. This supersedes the MCP, plugin, and GPT Actions dep
 
 Test site: https://setwise-test.setwise-jlk298.workers.dev
 
-Deployment: `b46e2f47c25c480bacbc9215c4cf7bd0`. D1 migration `0003_mobile_coach.sql` is applied; the rep-out update needs no schema migration.
+Deployment: `14d953bc62f941328c1b4a1d339eecbd`. D1 migration `0003_mobile_coach.sql` is applied; rep-out and superset updates need no schema migration. Routine revision 4 includes ten saved superset pairings; see [SUPERSETS.md](SUPERSETS.md).
 
 The standalone entry is `standalone/worker.ts`. Cloudflare D1 is the source of truth for workouts, sets, history, progression, routines, and coach proposals. `/mcp` and OAuth endpoints return 404. No ChatGPT app installation is required.
 

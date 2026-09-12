@@ -1,9 +1,17 @@
 import type {Variant, Session, LoggedSet, Side, SetType, Recommendation, Rules} from './model';
 import {sessionVariant} from './routine';
 import {programRecommendation} from './rtf';
+import {coversSide} from './set-sides';
 const clamp=(n:number,min:number,max:number)=>Math.max(min,Math.min(max,n));
-const sameSide=(s:LoggedSet,side:Side)=>s.side===side || s.side==='unknown';
+const sameSide=(s:LoggedSet,side:Side)=>coversSide(s,side) || s.side==='unknown';
 export function recommend(v:Variant, session:Session, all:LoggedSet[], side:Side, type:SetType='working', now=Date.now()):Recommendation {
+  if(v.unilateral&&side==='both'){
+    const sides=['left','right'].map(s=>recommend(v,session,all,s as Side,type,now));
+    const stopped=sides.find(s=>s.status==='pause')??sides.find(s=>s.status==='complete');
+    if(stopped)return stopped;
+    const weights=sides.map(s=>s.weight).filter((w):w is number=>w!==null);
+    return {...sides[0],weight:weights.length?Math.min(...weights):null,reps:Math.min(...sides.map(s=>s.reps)),repOut:sides.every(s=>s.repOut),reason:sides[0].reason.replace("this side's","each side's")};
+  }
   v=sessionVariant(v,session);
   const rules=session.rules;
   const min=rules.minReps??v.minReps,max=rules.maxReps??v.maxReps,targetRir=rules.targetRir??session.prescriptions?.find(p=>p.variantId===v.id)?.targetRir??2;

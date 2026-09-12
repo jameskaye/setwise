@@ -44,3 +44,7 @@ Deployment: `b46e2f47c25c480bacbc9215c4cf7bd0`. Browser sign-in and OpenRouter s
 ## Private partner accounts — 2026-09-11
 
 Deployed `99f248a82e794d96b1782c93b2285d35`. Account → Create partner access gives the partner a separate key and empty workout history. Plan now includes a personal starter/editor and reviewed program-file import for ChatGPT changes. See [PRIVATE-ACCOUNTS.md](PRIVATE-ACCOUNTS.md) for use and verification. Live sign-in and screens passed iPhone WebKit checks; original workout data and revision 4 matched the pre-deployment export. No original Sites history was imported.
+
+## Combined sets and automatic workout flow — 2026-09-12
+
+Deployment `ec77b6f4f4834dce8498c7c9870309ff` adds one-entry logging for both sides, exercise-by-exercise supersets, automatic advancement, carried working weights, clearable number fields and active-workout discard. See [WORKOUT-FLOW.md](WORKOUT-FLOW.md). All 48 pre-deployment entries and routine revision 4 were preserved.

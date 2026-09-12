@@ -14,6 +14,7 @@ export const actionSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('supersets'),sessionId:id,supersets:supersetsSchema,expectedSupersets:supersetsSchema}),
  z.object({action:z.literal('undo'),setId:id,sessionId:id}),
  z.object({action:z.literal('finish'),sessionId:id}),
+ z.object({action:z.literal('abort'),sessionId:id}),
  z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30),workoutId:id.optional(),expectedRoutineRevision:z.number().int().min(0).optional()}),
  z.object({action:z.literal('session'),sessionId:id,name:z.string().trim().min(1).max(80),notes:z.string().max(4000),plan:z.array(id).min(1).max(30)}),
  z.object({action:z.literal('coach'),id:id,sessionId:id,variantId:id,message:z.string().trim().min(1).max(2000)}),
@@ -36,6 +37,7 @@ export async function performWorkout(owner:string,input:unknown){try{
   if(table&&'id' in a){const row=await query(`SELECT owner FROM ${table} WHERE id = ?`,a.id).first();if(row&&row.owner!==owner)throw new ApiError(409,'Identifier unavailable. Retry with a new identifier.');}
   if(a.action==='variant'&&!a.exerciseId){const row=await query('SELECT owner FROM exercises WHERE id = ?',a.id+'-base').first();if(row&&row.owner!==owner)throw new ApiError(409,'Identifier unavailable. Retry with a new identifier.');}
   const session='sessionId' in a?state.sessions.find(s=>s.id===a.sessionId):undefined;
+  if(a.action==='abort'&&!session)return reply(state);
   if(a.action==='finish'&&session?.status==='finished')return reply(state);
   if(a.action==='log'&&state.sets.some(s=>s.id===a.id)){
     const existing=state.sets.find(s=>s.id===a.id)!;
@@ -48,7 +50,7 @@ export async function performWorkout(owner:string,input:unknown){try{
   if(a.action==='log'){
     const existing=state.sets.find(s=>s.id===a.id);if(existing){if(Object.entries(a).some(([key,value])=>key!=='action'&&existing[key as keyof LoggedSet]!==value))throw new ApiError(409,'Set ID was already used for a different set.');return reply(state);}
     const v=state.variants.find(v=>v.id===a.variantId)!;
-    if((v.unilateral && a.side==='both')||(!v.unilateral && a.side!=='both'))throw new InputError('Select the correct side for this exercise.');
+    if(!v.unilateral && a.side!=='both')throw new InputError('Select the correct side for this exercise.');
     if(!session!.plan.includes(v.id))throw new InputError('Add this exercise to your workout first.');
     if(a.painSeverity>0 && !a.painLocation.trim())throw new InputError('Choose or enter where you felt pain.');
     const before=recommend(v,session!,state.sets,a.side,a.type,now);
@@ -66,6 +68,19 @@ export async function performWorkout(owner:string,input:unknown){try{
     const latest=state.sets.filter(s=>s.sessionId===a.sessionId).sort((a,b)=>b.createdAt-a.createdAt)[0];
     if(!latest||latest.id!==a.setId)throw new InputError('Only the latest set in this workout can be undone.');
     await database().batch([query('DELETE FROM progressions WHERE owner = ? AND set_id = ?',owner,a.setId),query('DELETE FROM sets WHERE owner = ? AND id = ? AND session_id = ?',owner,a.setId,a.sessionId)]);
+  } else if(a.action==='abort'){
+    // Lock the active session and delete its children in the same transaction.
+    // A concurrent finish wins or loses the lock; completed history is never erased.
+    const guard="EXISTS (SELECT 1 FROM sessions WHERE id = ? AND owner = ? AND status = 'discarding')";
+    const result=await database().batch([
+      query("UPDATE sessions SET status = 'discarding' WHERE id = ? AND owner = ? AND status = 'active'",a.sessionId,owner),
+      query(`DELETE FROM progressions WHERE session_id = ? AND owner = ? AND ${guard}`,a.sessionId,owner,a.sessionId,owner),
+      query(`DELETE FROM sets WHERE session_id = ? AND owner = ? AND ${guard}`,a.sessionId,owner,a.sessionId,owner),
+      query(`DELETE FROM coach_messages WHERE session_id = ? AND owner = ? AND ${guard}`,a.sessionId,owner,a.sessionId,owner),
+      query(`DELETE FROM coach_requests WHERE owner = ? AND json_extract(proposal, '$.sessionId') = ? AND ${guard}`,owner,a.sessionId,a.sessionId,owner),
+      query("DELETE FROM sessions WHERE id = ? AND owner = ? AND status = 'discarding'",a.sessionId,owner),
+    ]);
+    if(!result[0].meta.changes)throw new ApiError(409,'Workout changed before it could be discarded. Reload to check its status.');
   } else if(a.action==='finish'){
     const rules={...session!.rules};
     if(rules.program)rules.program={...rules.program,advance:state.sets.some(s=>s.sessionId===a.sessionId&&s.type==='working')};

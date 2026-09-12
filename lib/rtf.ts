@@ -1,5 +1,6 @@
 import type {LoggedSet, Recommendation, Session, Side, Snapshot, Variant} from './model';
 import type {Routine} from './routine';
+import {coversSide} from './set-sides';
 
 // Transcribed from the supplied SBS Setup rows 4 and 9. Deload overrides are
 // in the workout sheets (4x!AS5:AU5, CP5:CR5, EM5:EO5), not Setup's rep lookup.
@@ -35,7 +36,7 @@ export function nextProgramWorkout(routine:Routine,sessions:Session[]){
   return routine.workouts.slice().sort((a,b)=>programWeek(routine,a.id,sessions)-programWeek(routine,b.id,sessions))[0];
 }
 function workingSets(session:Session,variantId:string,side:Side,sets:LoggedSet[]){
-  return sets.filter(s=>s.sessionId===session.id&&s.variantId===variantId&&s.side===side&&s.type==='working').sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
+  return sets.filter(s=>s.sessionId===session.id&&s.variantId===variantId&&coversSide(s,side)&&s.type==='working').sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
 }
 export function liftOutcome(session:Session,lift:ProgramLift,side:Side,sets:LoggedSet[]){
   const work=workingSets(session,lift.variantId,side,sets);
@@ -91,7 +92,7 @@ export function programRecommendation(v:Variant,session:Session,sets:LoggedSet[]
   const program=session.rules.program,lift=program?.lifts.find(l=>l.variantId===v.id);
   if(!program||!lift)return;
   const work=workingSets(session,v.id,side,sets),count=work.length;
-  const weight=lift.weight[side]??work[0]?.weight??null;
+  const weight=work.at(-1)?.weight??lift.weight[side]??null;
   const final=lift.repOutTarget!==null&&count===lift.sets-1;
   const base={min:lift.reps,max:lift.maxReps,targetRir:0,reps:final?lift.repOutTarget!:lift.reps,weight,status:'ready' as Recommendation['status'],label:final?'Final set · rep out':isDeload(program.week)?'Deload set':'Prescribed set',program:true,repOut:final};
   if(type==='warmup')return {...base,weight:weight===null?null:roundLoad(weight*.55,lift.increment),label:'Warmup',repOut:false,reason:'Light rehearsal. Warmups do not affect the program.'};

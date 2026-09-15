@@ -27,16 +27,27 @@ export async function applyWorkout(owner:string,input:unknown){
  if(prior){if(prior.request_payload!==body)throw new ApiError(409,'Request ID was already used.');return {saved:true,requestId:a.requestId,replayed:true};}
  const session=state.sessions.find(s=>s.id===a.sessionId&&s.status==='active');
  if(!session)throw new ApiError(409,'Session is no longer active.');
- if(session.rules.program)throw new ApiError(409,'This workout follows your saved rep-out program. The coach can explain it, but cannot replace its prescribed sets.');
+
  if(await configurationVersion(session)!==a.expectedConfiguration)throw new ApiError(409,'Workout changed. Read context again before applying changes.');
  if(a.workout.exercises.some(e=>!state.variants.some(v=>v.id===e.variantId)))throw new ApiError(400,'Unknown exercise variant.');
  // Keep logged exercises in the lineup for history visibility, but skip removed ones.
  const wanted=a.workout.exercises.map(e=>e.variantId);
  const removed=[...new Set(state.sets.filter(s=>s.sessionId===session.id&&!wanted.includes(s.variantId)).map(s=>s.variantId))];
- const rules={...session.rules,skipped:[...new Set([...(session.rules.skipped??[]),...removed])]};
+ const rules={...session.rules,skipped:[...new Set([...(session.rules.skipped??[]),...session.plan.filter(id=>!wanted.includes(id))])]};
+ if(rules.supersets)rules.supersets=rules.supersets.filter(pair=>pair.every(id=>wanted.includes(id)));
+ if(session.rules.program){
+   rules.program={...session.rules.program,lifts:a.workout.exercises.map(p=>{
+     const old=session.rules.program!.lifts.find(l=>l.variantId===p.variantId),baseline=session.prescriptions?.find(e=>e.variantId===p.variantId);
+     if(!old)return {variantId:p.variantId,profile:'controlled' as const,sets:p.sets,reps:p.minReps,maxReps:p.maxReps,repOutTarget:null,intensity:null,trainingMax:{},weight:{},increment:state.variants.find(v=>v.id===p.variantId)!.increment,modified:true};
+     const changeReps=baseline?(p.minReps!==baseline.minReps||p.maxReps!==baseline.maxReps):p.minReps!==old.reps||p.maxReps!==old.maxReps;
+     const changeSets=p.sets!==(baseline?.sets??old.sets);
+     return {...old,...(changeSets?{sets:p.sets}:{}),...(changeReps?{reps:p.minReps,maxReps:p.maxReps,repOutTarget:null}:{}),...((old.modified||changeSets||changeReps)?{modified:true}:{})};
+   })};
+   for(const old of session.rules.program.lifts)if(!wanted.includes(old.variantId))rules.program.lifts.push({...old,modified:true});
+ }
  const oldRules=JSON.stringify(session.rules),oldPlan=JSON.stringify(session.plan),oldPrescriptions=JSON.stringify(session.prescriptions??[]);
  const results=await database().batch([
- query('UPDATE sessions SET name = ?, plan = ?, prescriptions = ?, rules = ? WHERE owner = ? AND id = ? AND status = ? AND name = ? AND notes = ? AND plan = ? AND prescriptions = ? AND rules = ?',a.workout.name,JSON.stringify([...wanted,...removed]),JSON.stringify(a.workout.exercises),JSON.stringify(rules),owner,session.id,'active',session.name,session.notes,oldPlan,oldPrescriptions,oldRules),
+ query('UPDATE sessions SET name = ?, plan = ?, prescriptions = ?, rules = ? WHERE owner = ? AND id = ? AND status = ? AND name = ? AND notes = ? AND plan = ? AND prescriptions = ? AND rules = ? AND (SELECT COUNT(*) FROM sets WHERE owner = ? AND session_id = ?) = ?',a.workout.name,JSON.stringify([...wanted,...removed]),JSON.stringify(a.workout.exercises),JSON.stringify(rules),owner,session.id,'active',session.name,session.notes,oldPlan,oldPrescriptions,oldRules,owner,session.id,state.sets.filter(s=>s.sessionId===session.id).length),
  query('INSERT INTO coach_messages (id,owner,session_id,created_at,message,response,request_payload) SELECT ?,?,?,?,?,?,? WHERE changes() > 0',messageId,owner,session.id,Date.now(),a.reason,'Updated the exercise lineup and targets for this workout. Logged sets and existing constraints are preserved.',body)
  ]);
  if(!results[0].meta.changes)throw new ApiError(409,'Workout changed while saving. Read context again.');

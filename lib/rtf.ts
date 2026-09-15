@@ -21,7 +21,7 @@ export function rtfAdjustment(reps:number,target:number){
 export const isDeload=(week:number)=>week%7===0;
 export const roundLoad=(load:number,step:number)=>Math.round((load+1e-9)/step)*step;
 export interface ProgramLift {
-  variantId:string; profile:'main'|'auxiliary'|'accessory'|'controlled';
+  modified?:boolean;variantId:string; profile:'main'|'auxiliary'|'accessory'|'controlled';
   sets:number; reps:number; maxReps:number; repOutTarget:number|null;
   intensity:number|null; trainingMax:Partial<Record<Side,number>>;
   weight:Partial<Record<Side,number>>; increment:number;
@@ -42,7 +42,7 @@ export function liftOutcome(session:Session,lift:ProgramLift,side:Side,sets:Logg
   const work=workingSets(session,lift.variantId,side,sets);
   const load=lift.weight[side]??work[0]?.weight;
   const tm=lift.trainingMax[side]??(lift.intensity&&load?load/lift.intensity:undefined);
-  const valid=work.length===lift.sets&&work.every(s=>s.weight===load&&s.painSeverity===0)
+  const valid=!lift.modified&&work.length===lift.sets&&work.every(s=>s.weight===load&&s.painSeverity===0)
     &&work.slice(0,-1).every(s=>s.reps>=lift.reps)&&!session.rules.easy&&!session.rules.skipped?.includes(lift.variantId)
     &&session.rules.maxSets===undefined&&session.rules.minReps===undefined&&session.rules.maxReps===undefined;
   const adjustment=valid&&lift.repOutTarget!==null?rtfAdjustment(work.at(-1)!.reps,lift.repOutTarget):0;
@@ -80,7 +80,7 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
         const work=prior?workingSets(prior,v.id,side,state.sets):[];
         let load=work[0]?.weight??config?.startingWeight;
         const oldLift=prior?.rules.program?.lifts.find(l=>l.variantId===v.id);
-        if(load!==undefined&&profile==='accessory'&&oldLift&&work.length===oldLift.sets&&work.every(s=>s.weight===load&&s.reps>=oldLift.maxReps&&!s.painSeverity)&&!prior!.rules.easy&&!prior!.rules.skipped?.includes(v.id))load+=v.increment;
+        if(load!==undefined&&profile==='accessory'&&oldLift&&!oldLift.modified&&work.length===oldLift.sets&&work.every(s=>s.weight===load&&s.reps>=oldLift.maxReps&&!s.painSeverity)&&!prior!.rules.easy&&!prior!.rules.skipped?.includes(v.id))load+=v.increment;
         if(load!==undefined)lift.weight[side]=isDeload(week)?roundLoad(load*.9,v.increment):load;
       }
     }

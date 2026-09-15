@@ -48,3 +48,7 @@ Deployed `99f248a82e794d96b1782c93b2285d35`. Account → Create partner access g
 ## Combined sets and automatic workout flow — 2026-09-12
 
 Deployment `ec77b6f4f4834dce8498c7c9870309ff` adds one-entry logging for both sides, exercise-by-exercise supersets, automatic advancement, carried working weights, clearable number fields and active-workout discard. See [WORKOUT-FLOW.md](WORKOUT-FLOW.md). All 48 pre-deployment entries and routine revision 4 were preserved.
+
+## RTF coach writes and volume — 2026-09-14
+
+Deployment `25db71e8c7b041e1ae8c9bab8329be7b` enables reviewed coach edits during RTF programs. The real OpenRouter proposal/Apply flow saved requested volume changes as routine revision 7 (main 5, auxiliary 4, accessory 2 sets; controlled work unchanged), preserving 63 logged entries. See [RTF-COACH-EDITS.md](RTF-COACH-EDITS.md).

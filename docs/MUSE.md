@@ -42,6 +42,13 @@ current state instead of double-logging.
 
 ## Setup on an existing deployment
 
+No extra secret is required: the Muse API accepts your existing site sign-in
+key as its bearer token (`Authorization: Bearer <login key>`). Deploy the
+latest code and enter the sign-in key into Muse's secure credential store when
+prompted. It is never committed to git.
+
+A dedicated token remains supported for least-privilege setups:
+
 1. Generate a token (32+ URL-safe characters, shown once):
    ```sh
    MUSE_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")
@@ -55,7 +62,7 @@ current state instead of double-logging.
    ```
 3. Deploy the latest code: `npx wrangler deploy --config standalone/wrangler.json`
 4. Save `$MUSE_KEY` in a password manager, then enter it into Muse's secure
-   credential store when prompted. It is never committed to git.
+   credential store when prompted.
 
 For new deployments, `node scripts/configure-cloudflare.mjs <D1 UUID>` now
 generates `museKey` alongside the other keys and writes `MUSE_KEY_HASH` into

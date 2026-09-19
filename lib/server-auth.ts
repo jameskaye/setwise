@@ -10,12 +10,17 @@ export async function actionOwner(r:Request){
  if(!token||!equal(await digest(token),env.COACH_KEY_HASH))throw new ApiError(401,'Invalid coach credential.');
  return env.OWNER_ID;
 }
-// Dedicated bearer credential for the Muse integration. Scoped to the owner's
-// workout data only; rotate by replacing the MUSE_KEY_HASH worker secret.
+// Bearer auth for the Muse integration. Accepts the site sign-in key
+// (LOGIN_KEY_HASH) so no second credential is needed; a dedicated token
+// remains accepted too when MUSE_KEY_HASH is configured, and can be rotated
+// independently by replacing that secret.
 export async function museOwner(r:Request){
- if(env.AUTH_MODE!=='standalone'||!env.OWNER_ID||!env.MUSE_KEY_HASH)throw new ApiError(503,'Muse API is not configured on this host.');
+ if(env.AUTH_MODE!=='standalone'||!env.OWNER_ID)throw new ApiError(503,'Muse API is not configured on this host.');
  const token=r.headers.get('authorization')?.match(/^Bearer ([A-Za-z0-9_-]{32,256})$/)?.[1];
- if(!token||!equal(await digest(token),env.MUSE_KEY_HASH))throw new ApiError(401,'Invalid Muse credential.');
+ const hash=token?await digest(token):'';
+ const dedicated=!!env.MUSE_KEY_HASH&&equal(hash,env.MUSE_KEY_HASH);
+ const login=!!env.LOGIN_KEY_HASH&&equal(hash,env.LOGIN_KEY_HASH);
+ if(!token||(!dedicated&&!login))throw new ApiError(401,'Invalid Muse credential.');
  return env.OWNER_ID;
 }
 async function signature(value:string){

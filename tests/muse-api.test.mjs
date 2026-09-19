@@ -12,9 +12,9 @@ const temp=mkdtempSync(join(tmpdir(),'setwise-muse-'));
 const sql=new DatabaseSync(join(temp,'muse.sqlite'));sql.exec('PRAGMA foreign_keys=ON');
 for(const f of readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort())sql.exec(readFileSync('drizzle/'+f,'utf8'));
 const adapter={prepare(text){return{bind(...values){const execute=()=>{const stmt=sql.prepare(text);if(/^\s*SELECT/i.test(text))return{results:stmt.all(...values)};const info=stmt.run(...values);return{results:[],meta:{changes:Number(info.changes)}};};return{first:async()=>execute().results[0]??null,all:async()=>execute(),run:async()=>execute(),execute};}};},async batch(statements){sql.exec('BEGIN');try{const result=statements.map(s=>s.execute());sql.exec('COMMIT');return result;}catch(e){sql.exec('ROLLBACK');throw e;}}};
-const museKey='muse-test-'.padEnd(48,'m'),coachKey='coach-test-'.padEnd(48,'c');
+const museKey='muse-test-'.padEnd(48,'m'),coachKey='coach-test-'.padEnd(48,'c'),loginKey='login-test-'.padEnd(48,'l');
 const hash=x=>createHash('sha256').update(x).digest('hex');
-globalThis.__museEnv={DB:adapter,AUTH_MODE:'standalone',OWNER_ID:'test-owner',MUSE_KEY_HASH:hash(museKey),COACH_KEY_HASH:hash(coachKey),LOGIN_KEY_HASH:hash('login'),SESSION_SECRET:'test-session-secret-'.padEnd(48,'s'),ASSETS:{fetch:async()=>new Response('Setwise UI')}};
+globalThis.__museEnv={DB:adapter,AUTH_MODE:'standalone',OWNER_ID:'test-owner',MUSE_KEY_HASH:hash(museKey),COACH_KEY_HASH:hash(coachKey),LOGIN_KEY_HASH:hash(loginKey),SESSION_SECRET:'test-session-secret-'.padEnd(48,'s'),ASSETS:{fetch:async()=>new Response('Setwise UI')}};
 await build({entryPoints:['standalone/worker.ts'],bundle:true,platform:'node',format:'esm',outfile:join(temp,'worker.mjs'),plugins:[{name:'test-env',setup(b){b.onResolve({filter:/^cloudflare:workers$/},()=>({path:'env',namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:'export const env=globalThis.__museEnv',loader:'js'}));}}]});
 const worker=(await import(pathToFileURL(join(temp,'worker.mjs')))).default;
 const museHeaders={Authorization:'Bearer '+museKey};
@@ -30,6 +30,10 @@ test('Muse API: credential isolation, today workout, logging, apply, history',as
  assert.equal((await call('/api/muse',{headers:{Authorization:'Bearer '+coachKey}})).status,401);
  assert.equal((await call('/api/coach',{headers:museHeaders})).status,401,'muse key grants no browser-cookie endpoint access');
  assert.equal((await call('/api/muse',{method:'POST',body:{action:'session',sessionId:'x',name:'x',notes:'',plan:[]}})).status,401,'unauthenticated writes rejected');
+ // The site sign-in key doubles as a Muse credential; it still grants no coach access.
+ const loginHeaders={Authorization:'Bearer '+loginKey};
+ assert.equal((await call('/api/muse',{headers:loginHeaders})).status,200,'login key opens the Muse API');
+ assert.equal((await call('/api/coach',{headers:loginHeaders})).status,401,'login key grants no coach access');
 
  // Today's workout read works and seeds the starter catalog.
  let ctx=await (await get('/api/muse')).json();

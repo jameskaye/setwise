@@ -10,6 +10,14 @@ export async function actionOwner(r:Request){
  if(!token||!equal(await digest(token),env.COACH_KEY_HASH))throw new ApiError(401,'Invalid coach credential.');
  return env.OWNER_ID;
 }
+// Dedicated bearer credential for the Muse integration. Scoped to the owner's
+// workout data only; rotate by replacing the MUSE_KEY_HASH worker secret.
+export async function museOwner(r:Request){
+ if(env.AUTH_MODE!=='standalone'||!env.OWNER_ID||!env.MUSE_KEY_HASH)throw new ApiError(503,'Muse API is not configured on this host.');
+ const token=r.headers.get('authorization')?.match(/^Bearer ([A-Za-z0-9_-]{32,256})$/)?.[1];
+ if(!token||!equal(await digest(token),env.MUSE_KEY_HASH))throw new ApiError(401,'Invalid Muse credential.');
+ return env.OWNER_ID;
+}
 async function signature(value:string){
  if(!env.SESSION_SECRET||env.SESSION_SECRET.length<32)throw new ApiError(503,'Browser sign-in is not configured.');
  const key=await crypto.subtle.importKey('raw',encoder.encode(env.SESSION_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);

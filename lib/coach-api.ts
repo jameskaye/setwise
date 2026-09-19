@@ -1,13 +1,32 @@
 import {z} from 'zod';
-import {actionOwner,json,digest} from './server-auth';
+import {actionOwner,museOwner,json,digest} from './server-auth';
 import {initialize,snapshot,database,query} from '@/db/store';
 import {ApiError,currentRoutine,routineHistory,saveRoutine} from '@/db/routine-store';
 import {identifier,prescriptionSchema} from './routine';
 import type {Session} from './model';
 export async function configurationVersion(s:Session){return digest(JSON.stringify([s.name,s.notes,s.plan,s.rules,s.prescriptions??[],s.routineRevision??null]));}
 export async function apiCall(r:Request,fn:(owner:string)=>Promise<unknown>){
- try{const owner=await actionOwner(r);await initialize(owner);return json(await fn(owner));}
- catch(e){if(e instanceof ApiError)return json({error:e.message},e.status);if(e instanceof z.ZodError)return json({error:'Invalid request',details:e.issues.map(i=>({path:i.path,message:i.message}))},400);if(e instanceof SyntaxError)return json({error:'Invalid JSON'},400);console.error('Coach API failed');return json({error:'Storage unavailable. Retry with the same requestId.'},503);}
+ return authedCall(r,actionOwner,async owner=>json(await fn(owner)));
+}
+// Muse integration entry points. Same owner scoping as the coach API, but
+// authenticated with the dedicated MUSE_KEY_HASH bearer credential so the
+// Muse token can be rotated or revoked independently.
+export async function museCall(r:Request,fn:(owner:string)=>Promise<unknown>){
+ return authedCall(r,museOwner,async owner=>json(await fn(owner)));
+}
+// Variant for handlers like performWorkout that already build their own Response.
+export async function museCallRaw(r:Request,fn:(owner:string)=>Promise<Response>){
+ return authedCall(r,museOwner,fn);
+}
+async function authedCall(r:Request,auth:(r:Request)=>Promise<string>,fn:(owner:string)=>Promise<Response>){
+ try{const owner=await auth(r);await initialize(owner);return await fn(owner);}
+ catch(e){return apiFailure(e);}
+}
+function apiFailure(e:unknown){
+ if(e instanceof ApiError)return json({error:e.message},e.status);
+ if(e instanceof z.ZodError)return json({error:'Invalid request',details:e.issues.map(i=>({path:i.path,message:i.message}))},400);
+ if(e instanceof SyntaxError)return json({error:'Invalid JSON'},400);
+ console.error('Coach API failed');return json({error:'Storage unavailable. Retry with the same requestId.'},503);
 }
 export async function readBody(r:Request){const body=await r.text();if(body.length>90000)throw new ApiError(413,'Request is too large.');return JSON.parse(body);}
 export async function context(owner:string){
@@ -54,3 +73,15 @@ export async function applyWorkout(owner:string,input:unknown){
  return {saved:true,requestId:a.requestId,scope:'current session only',preserved:'Logged sets, pain pauses, time limit, and existing session constraints',session:(await snapshot(owner)).sessions.find(s=>s.id===session.id)};
 }
 export {currentRoutine,routineHistory,saveRoutine,snapshot};
+// Shared paginated history used by both the coach and Muse API namespaces.
+export async function historyResult(r:Request,owner:string){
+ const s=await snapshot(owner);
+ const u=new URL(r.url),offset=Number(u.searchParams.get('offset')??0),kind=u.searchParams.get('kind')??'sets';
+ if(!Number.isSafeInteger(offset)||offset<0)throw new ApiError(400,'Invalid offset');
+ if(kind==='revisions'){const before=Number(u.searchParams.get('before')??Number.MAX_SAFE_INTEGER);if(!Number.isSafeInteger(before)||before<1)throw new ApiError(400,'Invalid revision cursor');const page=await routineHistory(owner,before),items=page.slice(0,1);return {items,nextBefore:page.length>1?items[0].revision:null};}
+ const variant=u.searchParams.get('variantId'),session=u.searchParams.get('sessionId');
+ if(kind==='sessions'){const rows=s.sessions.filter(x=>!session||x.id===session).sort((a,b)=>b.startedAt-a.startedAt||b.id.localeCompare(a.id));const items=rows.slice(offset,offset+5).map(w=>({...w,setCount:s.sets.filter(x=>x.sessionId===w.id).length}));return {items,nextOffset:offset+items.length<rows.length?offset+items.length:null};}
+ if(kind!=='sets')throw new ApiError(400,'Unknown history kind');
+ const filtered=s.sets.filter(x=>(!variant||x.variantId===variant)&&(!session||x.sessionId===session)).sort((a,b)=>b.createdAt-a.createdAt||b.id.localeCompare(a.id));
+ const items=filtered.slice(offset,offset+30);return {items,total:filtered.length,nextOffset:offset+items.length<filtered.length?offset+items.length:null};
+}

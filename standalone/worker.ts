@@ -2,6 +2,10 @@ import {env} from 'cloudflare:workers';
 import * as workout from '../app/api/workout/route';
 import * as coach from '../app/api/coach/route';
 import * as backup from '../app/api/export/route';
+import * as muse from '../app/api/muse/route';
+import * as museHistory from '../app/api/muse/history/route';
+import * as museApply from '../app/api/muse/apply/route';
+import * as museRoutine from '../app/api/muse/routine/route';
 import {ApiError} from '../db/routine-store';
 import {json,browserOwner,sameOrigin,digest,equal,makeCookie} from '../lib/server-auth';
 import {query} from '../db/store';
@@ -39,6 +43,7 @@ export default {async fetch(r:Request):Promise<Response>{
   if(path==='/api/account')return await accountRoute(r);
   const routes:Record<string,Record<string,(r:Request)=>Promise<Response>>>={
    '/api/workout':{GET:workout.GET,POST:workout.POST},'/api/coach':{GET:coach.GET,POST:coach.POST},'/api/export':{GET:backup.GET},
+   '/api/muse':{GET:muse.GET,POST:muse.POST},'/api/muse/history':{GET:museHistory.GET},'/api/muse/apply':{POST:museApply.POST},'/api/muse/routine':{GET:museRoutine.GET,PUT:museRoutine.PUT},
   };
   if(routes[path]){const fn=routes[path][r.method];return fn?fn(r):new Response(null,{status:405});}
   if(path.startsWith('/api/'))return json({error:'Not found'},404);

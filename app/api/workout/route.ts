@@ -13,6 +13,8 @@ export const actionSchema=z.discriminatedUnion('action',[
  saveRoutineSchema.extend({action:z.literal('save_routine')}),
  z.object({action:z.literal('supersets'),sessionId:id,supersets:supersetsSchema,expectedSupersets:supersetsSchema}),
  z.object({action:z.literal('undo'),setId:id,sessionId:id}),
+ z.object({action:z.literal('update_set'),setId:id,patch:z.object({weight:num.min(0).max(2000).optional(),reps:num.int().min(0).max(100).optional(),rir:num.int().min(0).max(3).nullable().optional(),side:z.enum(['left','right','both']).optional(),type:z.enum(['working','warmup','backoff','drop']).optional(),painLocation:z.string().max(100).optional(),painSeverity:num.int().min(0).max(10).optional(),note:z.string().max(1000).optional()}).refine(p=>Object.keys(p).length>0,'No changes supplied.')}),
+ z.object({action:z.literal('delete_set'),setId:id}),
  z.object({action:z.literal('finish'),sessionId:id}),
  z.object({action:z.literal('abort'),sessionId:id}),
  z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30),workoutId:id.optional(),expectedRoutineRevision:z.number().int().min(0).optional()}),
@@ -68,6 +70,30 @@ export async function performWorkout(owner:string,input:unknown){try{
     const latest=state.sets.filter(s=>s.sessionId===a.sessionId).sort((a,b)=>b.createdAt-a.createdAt)[0];
     if(!latest||latest.id!==a.setId)throw new InputError('Only the latest set in this workout can be undone.');
     await database().batch([query('DELETE FROM progressions WHERE owner = ? AND set_id = ?',owner,a.setId),query('DELETE FROM sets WHERE owner = ? AND id = ? AND session_id = ?',owner,a.setId,a.sessionId)]);
+  } else if(a.action==='update_set'){
+    // Edit any historical set. Reapplying identical values is a no-op, so
+    // retries are safe. The stale progression recommendation is dropped.
+    const existing=state.sets.find(s=>s.id===a.setId);
+    if(!existing)throw new ApiError(404,'Set not found.');
+    const v=state.variants.find(v=>v.id===existing.variantId);
+    const merged={...existing,...a.patch};
+    if(v&&!v.unilateral&&merged.side!=='both')throw new InputError('Select the correct side for this exercise.');
+    if(merged.painSeverity>0&&!merged.painLocation.trim())throw new InputError('Choose or enter where you felt pain.');
+    const changed=Object.entries(a.patch).some(([k,val])=>existing[k as keyof LoggedSet]!==val);
+    if(changed){
+      const cols={weight:'weight',reps:'reps',rir:'rir',side:'side',type:'type',painLocation:'pain_location',painSeverity:'pain_severity',note:'note'} as const;
+      const assignments:string[]=[],values:unknown[]=[];
+      for(const [k,col] of Object.entries(cols))if(k in a.patch){assignments.push(`${col} = ?`);values.push((a.patch as Record<string,unknown>)[k]);}
+      await database().batch([
+        query(`UPDATE sets SET ${assignments.join(', ')} WHERE id = ? AND owner = ?`,...values,a.setId,owner),
+        query('DELETE FROM progressions WHERE owner = ? AND set_id = ?',owner,a.setId),
+      ]);
+    }
+  } else if(a.action==='delete_set'){
+    // Idempotent: deleting an already-deleted set reports deleted:false.
+    const existing=state.sets.find(s=>s.id===a.setId);
+    if(existing)await database().batch([query('DELETE FROM progressions WHERE owner = ? AND set_id = ?',owner,a.setId),query('DELETE FROM sets WHERE owner = ? AND id = ?',owner,a.setId)]);
+    return reply({...await snapshot(owner),setDeleted:{id:a.setId,deleted:!!existing}});
   } else if(a.action==='abort'){
     // Lock the active session and delete its children in the same transaction.
     // A concurrent finish wins or loses the lock; completed history is never erased.

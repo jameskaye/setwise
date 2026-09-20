@@ -13,7 +13,7 @@ workout data only.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/muse` | Today's workout: active session (with prescriptions and `configurationVersion`), exercise/variant catalog, saved routine + constraints, recent sets/sessions |
-| POST | `/api/muse` | Targeted actions (same validated operations as the web app): `start`, `log`, `undo`, `finish`, `abort`, `session` (rename/notes/reorder exercises), `variant`, `targets`, `coach` (training constraints in plain language), `supersets` |
+| POST | `/api/muse` | Targeted actions (same validated operations as the web app): `start`, `log`, `undo`, `update_set`, `delete_set`, `finish`, `abort`, `session` (rename/notes/reorder exercises), `variant`, `targets`, `coach` (training constraints in plain language), `supersets` |
 | GET | `/api/muse/history?kind=sets&variantId=&sessionId=&offset=` | Paginated set history for progression questions |
 | GET | `/api/muse/history?kind=sessions` | Recent sessions |
 | GET | `/api/muse/history?kind=revisions` | Routine revision history |

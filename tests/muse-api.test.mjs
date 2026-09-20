@@ -107,6 +107,29 @@ test('Muse API: credential isolation, today workout, logging, apply, history',as
  assert.equal(hist.total,1);
  assert.equal(hist.items[0].reps,11);
 
+ // Arbitrary historical set edit and delete.
+ const editId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'log',id:editId,sessionId,variantId:variant.id,weight:70,reps:8,rir:2,side,type:'working',painLocation:'',painSeverity:0,note:'edit me'})).status,200);
+ assert.equal((await post('/api/muse',{action:'update_set',setId:editId,patch:{reps:9,note:'edited'}})).status,200);
+ hist=await (await get('/api/muse/history?kind=sets&variantId='+variant.id)).json();
+ const edited=hist.items.find(s=>s.id===editId);
+ assert.equal(edited.reps,9);
+ assert.equal(edited.note,'edited');
+ // Reapplying identical values is a safe no-op.
+ assert.equal((await post('/api/muse',{action:'update_set',setId:editId,patch:{reps:9,note:'edited'}})).status,200);
+ assert.equal((await post('/api/muse',{action:'update_set',setId:crypto.randomUUID(),patch:{reps:5}})).status,404,'unknown set');
+ assert.equal((await post('/api/muse',{action:'update_set',setId:editId,patch:{}})).status,400,'empty patch rejected');
+ assert.equal((await post('/api/muse',{action:'update_set',setId:editId,patch:{painSeverity:5}})).status,400,'pain without location rejected');
+ if(!variant.unilateral)assert.equal((await post('/api/muse',{action:'update_set',setId:editId,patch:{side:'left'}})).status,400,'bilateral set rejects single side');
+ // Delete is idempotent: first call deletes, the retry reports deleted:false.
+ const del=await post('/api/muse',{action:'delete_set',setId:editId});
+ assert.equal(del.status,200);
+ assert.equal((await del.json()).setDeleted.deleted,true);
+ assert.equal((await (await post('/api/muse',{action:'delete_set',setId:editId})).json()).setDeleted.deleted,false);
+ assert.equal((await (await post('/api/muse',{action:'delete_set',setId:crypto.randomUUID()})).json()).setDeleted.deleted,false);
+ hist=await (await get('/api/muse/history?kind=sets&variantId='+variant.id)).json();
+ assert.ok(!hist.items.some(s=>s.id===editId),'deleted set is gone from history');
+
  // Routine read works; write path validates input.
  const routine=await (await get('/api/muse/routine')).json();
  assert.ok(routine===null||typeof routine.revision==='number');

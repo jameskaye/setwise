@@ -55,4 +55,21 @@ test('unknown load calibration, controlled recovery and accessory double progres
   assert.equal(lift.weight.both,profile==='main'?105:profile==='accessory'?105:100);
  }
 });
+test('a training-max override raises the floor mid-cycle; the chain still owns decreases',()=>{
+ const s=state(),session=start(s);
+ for(let i=0;i<3;i++)log(s,session,'both',i===2?12:5);finish(session); // rep-out 12 vs 10 -> chain TM 252.5
+ const raised=structuredClone(routine);raised.program.lifts[0].trainingMaxOverride=260;
+ const next=start(s,raised),lift=next.rules.program.lifts[0];
+ assert.equal(lift.trainingMax.both,260);
+ assert.equal(lift.weight.both,195); // week 2 at 75%
+ const stale=structuredClone(routine);stale.program.lifts[0].trainingMaxOverride=240;
+ const next2=start(s,stale);
+ assert.equal(next2.rules.program.lifts[0].trainingMax.both,252.5,'override below the chain stays dormant');
+});
+test('without an override the chain still applies downward adjustments',()=>{
+ const s=state(),session=start(s);
+ for(let i=0;i<3;i++)log(s,session,'both',i===2?9:5);finish(session); // rep-out 9 vs 10 -> -2%
+ const next=start(s);
+ assert.equal(next.rules.program.lifts[0].trainingMax.both,245);
+});
 test.after(()=>rmSync(temp,{recursive:true,force:true}));

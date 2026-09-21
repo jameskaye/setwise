@@ -21,6 +21,7 @@ export const routineSchema=z.object({
   program:z.object({id:identifier,lifts:z.array(z.object({
     workoutId:identifier,variantId:identifier,profile:z.enum(['main','auxiliary','accessory','controlled']),
     trainingMax:z.number().finite().positive().max(2000).optional(),
+    trainingMaxOverride:z.number().finite().positive().max(2000).optional(),
     startingWeight:z.number().finite().min(0).max(2000).optional(),
   }).strict()).max(140)}).strict().optional(),
 }).strict().refine(r=>new Set(r.workouts.map(w=>w.id)).size===r.workouts.length,'Use distinct workout IDs');

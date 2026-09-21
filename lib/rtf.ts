@@ -70,7 +70,12 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
     for(const side of (v.unilateral?['left','right']:['both']) as Side[]){
       const outcome=old&&previous?liftOutcome(previous,old,side,state.sets):undefined;
       if(rtf){
-        const tm=outcome?.trainingMax??config?.trainingMax;
+        // A training-max override in the saved routine raises the floor for future
+        // workouts; otherwise the session-to-session chain owns the value, so
+        // automatic adjustments (up and down) are unaffected.
+        const tm=config?.trainingMaxOverride!==undefined
+          ?Math.max(outcome?.trainingMax??0,config.trainingMaxOverride)
+          :(outcome?.trainingMax??config?.trainingMax);
         if(tm){lift.trainingMax[side]=tm;lift.weight[side]=roundLoad(tm*lift.intensity!,v.increment);}
       }else{
         // Accessories progress between completed sessions, never from a guessed RIR.

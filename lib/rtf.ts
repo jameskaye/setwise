@@ -38,7 +38,25 @@ export function nextProgramWorkout(routine:Routine,sessions:Session[]){
 function workingSets(session:Session,variantId:string,side:Side,sets:LoggedSet[]){
   return sets.filter(s=>s.sessionId===session.id&&s.variantId===variantId&&coversSide(s,side)&&s.type==='working').sort((a,b)=>a.createdAt-b.createdAt||a.id.localeCompare(b.id));
 }
+// Accessories progress on load, not training max: beat the last-set rep-out
+// target on a complete, unmodified, pain-free session and the next session
+// rises one equipment increment. Anything else holds the load.
+function accessoryOutcome(session:Session,lift:ProgramLift,side:Side,sets:LoggedSet[]){
+  const work=workingSets(session,lift.variantId,side,sets);
+  const load=work[0]?.weight??lift.weight[side];
+  const valid=!lift.modified&&work.length===lift.sets&&load!==undefined&&work.every(s=>s.weight===load&&s.painSeverity===0)
+    &&work.slice(0,-1).every(s=>s.reps>=lift.reps)&&!session.rules.easy&&!session.rules.skipped?.includes(lift.variantId)
+    &&session.rules.maxSets===undefined&&session.rules.minReps===undefined&&session.rules.maxReps===undefined;
+  const beaten=valid&&lift.repOutTarget!==null&&work.at(-1)!.reps>lift.repOutTarget;
+  const bump=beaten?lift.increment:0;
+  return {trainingMax:undefined,adjustment:bump,valid,load:load===undefined?undefined:load+bump,
+    reason:!valid?'Incomplete, changed-load, modified, or painful work: load held.'
+      :lift.repOutTarget===null?'No rep-out adjustment.'
+      :beaten?`Final set ${work.at(-1)!.reps} beat ${lift.repOutTarget}: load +${bump} next session.`
+      :`Final set ${work.at(-1)!.reps} / ${lift.repOutTarget}: target not beaten, load held.`};
+}
 export function liftOutcome(session:Session,lift:ProgramLift,side:Side,sets:LoggedSet[]){
+  if(lift.profile==='accessory')return accessoryOutcome(session,lift,side,sets);
   const work=workingSets(session,lift.variantId,side,sets);
   const load=lift.weight[side]??work[0]?.weight;
   const tm=lift.trainingMax[side]??(lift.intensity&&load?load/lift.intensity:undefined);
@@ -64,7 +82,9 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
     const schedule=(profile==='main'?RTF_MAIN:RTF_AUXILIARY)[week-1];
     const lift:ProgramLift={variantId:v.id,profile,sets:rtf?p.sets:isDeload(week)?Math.max(1,Math.ceil(p.sets/2)):p.sets,
       reps:rtf?schedule[1]:p.minReps,maxReps:rtf?schedule[1]:p.maxReps,
-      repOutTarget:rtf&&!isDeload(week)?schedule[2]:null,intensity:rtf?schedule[0]:null,
+      // Accessories get a last-set rep-out at the top of their range; controlled
+      // work and deloads keep a fixed target with no automatic increase.
+      repOutTarget:rtf&&!isDeload(week)?schedule[2]:profile==='accessory'&&!isDeload(week)?p.maxReps:null,intensity:rtf?schedule[0]:null,
       trainingMax:{},weight:{},increment:v.increment};
     const old=previous?.rules.program?.lifts.find(l=>l.variantId===v.id&&l.profile===profile);
     for(const side of (v.unilateral?['left','right']:['both']) as Side[]){
@@ -83,9 +103,14 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
         const prior=state.sessions.filter(s=>s.status==='finished'&&s.rules.program?.id===routine.program!.id&&s.rules.program.workoutId===workoutId&&!isDeload(s.rules.program.week)&&s.rules.program.advance)
           .sort((a,b)=>b.rules.program!.week-a.rules.program!.week).find(s=>workingSets(s,v.id,side,state.sets).length);
         const work=prior?workingSets(prior,v.id,side,state.sets):[];
-        let load=work[0]?.weight??config?.startingWeight;
         const oldLift=prior?.rules.program?.lifts.find(l=>l.variantId===v.id);
-        if(load!==undefined&&profile==='accessory'&&oldLift&&!oldLift.modified&&work.length===oldLift.sets&&work.every(s=>s.weight===load&&s.reps>=oldLift.maxReps&&!s.painSeverity)&&!prior!.rules.easy&&!prior!.rules.skipped?.includes(v.id))load+=v.increment;
+        let load=work[0]?.weight??config?.startingWeight;
+        // Accessories use last-set rep-out progression: beat the target on a
+        // clean, complete session and the load rises one equipment increment.
+        if(prior&&oldLift&&profile==='accessory'){
+          const outcome=liftOutcome(prior,oldLift,side,state.sets);
+          if(outcome.load!==undefined)load=outcome.load;
+        }
         if(load!==undefined)lift.weight[side]=isDeload(week)?roundLoad(load*.9,v.increment):load;
       }
     }

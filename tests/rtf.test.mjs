@@ -45,15 +45,39 @@ test('left and right progress separately; undo removes the result; changed loads
  s.sets[2].weight=180;assert.equal(liftOutcome(session,lift,'left',s.sets).trainingMax,250);
  s.sets[2].weight=175;s.sets[0].painSeverity=1;assert.equal(liftOutcome(session,lift,'left',s.sets).trainingMax,250);
 });
-test('unknown load calibration, controlled recovery and accessory double progression',()=>{
+test('unknown load calibration, controlled recovery and accessory rep-out progression',()=>{
  for(const profile of ['main','controlled','accessory']){
   const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile};
   const s=state(),session=start(s,r);
   assert.equal(recommend(variant,session,s.sets,'both').weight,null);
-  for(let i=0;i<3;i++)log(s,session,'both',profile==='main'?(i===2?10:5):6,{weight:100});
+  for(let i=0;i<3;i++)log(s,session,'both',profile==='main'?(i===2?10:5):profile==='accessory'?(i===2?7:6):6,{weight:100});
   finish(session);const next=start(s,r),lift=next.rules.program.lifts[0];
+  assert.equal(lift.repOutTarget,profile==='accessory'?6:profile==='main'?8:null);
   assert.equal(lift.weight.both,profile==='main'?105:profile==='accessory'?105:100);
  }
+});
+test('accessories hold their load when the rep-out target is matched but not beaten, or the session is incomplete',()=>{
+ const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'accessory'};
+ { // matched exactly: hold
+  const s=state(),session=start(s,r);
+  for(let i=0;i<3;i++)log(s,session,'both',6,{weight:100});
+  finish(session);
+  assert.equal(start(s,r).rules.program.lifts[0].weight.both,100);
+ }
+ { // incomplete: hold
+  const s=state(),session=start(s,r);
+  for(let i=0;i<2;i++)log(s,session,'both',i===1?9:6,{weight:100});
+  finish(session);
+  assert.equal(start(s,r).rules.program.lifts[0].weight.both,100);
+ }
+});
+test('accessory deloads halve sets with no rep-out target',()=>{
+ const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'accessory'};
+ const s=state();
+ for(let w=0;w<6;w++){const session=start(s,r);for(let i=0;i<3;i++)log(s,session,'both',i===2?7:6,{weight:100});finish(session);}
+ const deload=start(s,r),lift=deload.rules.program.lifts[0];
+ assert.equal(deload.rules.program.week,7);
+ assert.equal(lift.sets,2);assert.equal(lift.repOutTarget,null);
 });
 test('a training-max override raises the floor mid-cycle; the chain still owns decreases',()=>{
  const s=state(),session=start(s);

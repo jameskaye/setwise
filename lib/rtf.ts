@@ -58,14 +58,26 @@ function accessoryOutcome(session:Session,lift:ProgramLift,side:Side,sets:Logged
 export function liftOutcome(session:Session,lift:ProgramLift,side:Side,sets:LoggedSet[]){
   if(lift.profile==='accessory')return accessoryOutcome(session,lift,side,sets);
   const work=workingSets(session,lift.variantId,side,sets);
-  const load=lift.weight[side]??work[0]?.weight;
-  const tm=lift.trainingMax[side]??(lift.intensity&&load?load/lift.intensity:undefined);
-  const valid=!lift.modified&&work.length===lift.sets&&work.every(s=>s.weight===load&&s.painSeverity===0)
+  const prescribed=lift.weight[side];
+  const actual=work[0]?.weight;
+  // Every working set at one load is a clean read. When that load is heavier
+  // than prescribed, re-anchor the training max from what was actually lifted
+  // instead of holding. Lighter or mixed loads still hold.
+  const consistent=work.length>0&&work.every(s=>s.weight===actual);
+  const adapted=consistent&&prescribed!==undefined&&actual!==undefined&&actual>prescribed;
+  const load=adapted?actual:(prescribed??actual);
+  const tm=adapted&&lift.intensity&&actual!==undefined?actual/lift.intensity
+    :(lift.trainingMax[side]??(lift.intensity&&load?load/lift.intensity:undefined));
+  const valid=!lift.modified&&consistent&&work.length===lift.sets&&load!==undefined
+    &&work.every(s=>s.painSeverity===0)
     &&work.slice(0,-1).every(s=>s.reps>=lift.reps)&&!session.rules.easy&&!session.rules.skipped?.includes(lift.variantId)
-    &&session.rules.maxSets===undefined&&session.rules.minReps===undefined&&session.rules.maxReps===undefined;
+    &&session.rules.maxSets===undefined&&session.rules.minReps===undefined&&session.rules.maxReps===undefined
+    &&(adapted||prescribed===undefined||actual===prescribed);
   const adjustment=valid&&lift.repOutTarget!==null?rtfAdjustment(work.at(-1)!.reps,lift.repOutTarget):0;
   return {trainingMax:tm===undefined?undefined:tm*(1+adjustment),adjustment,valid,load,
-    reason:!valid?'Incomplete, changed-load, modified, or painful work: training max held.':lift.repOutTarget===null?'No rep-out adjustment.':`Final set ${work.at(-1)!.reps} / ${lift.repOutTarget}: training max ${adjustment>0?'+':''}${Number((adjustment*100).toFixed(2))}%.`};
+    reason:!valid?'Incomplete, changed-load, modified, or painful work: training max held.'
+      :adapted?`All sets at ${actual} (heavier than prescribed ${prescribed}): training max re-anchored from the actual load${adjustment!==0?`; rep-out adjustment ${adjustment>0?'+':''}${Number((adjustment*100).toFixed(2))}%`:''}.`
+      :lift.repOutTarget===null?'No rep-out adjustment.':`Final set ${work.at(-1)!.reps} / ${lift.repOutTarget}: training max ${adjustment>0?'+':''}${Number((adjustment*100).toFixed(2))}%.`};
 }
 export function buildProgramSession(routine:Routine,workoutId:string,state:Snapshot):ProgramSession|undefined {
   if(!routine.program)return;
@@ -111,6 +123,9 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
           const outcome=liftOutcome(prior,oldLift,side,state.sets);
           if(outcome.load!==undefined)load=outcome.load;
         }
+        // A load override in the saved routine raises the floor for future
+        // accessory sessions; earned progression can continue above it.
+        if(profile==='accessory'&&config?.loadOverride!==undefined&&load!==undefined)load=Math.max(load,config.loadOverride);
         if(load!==undefined)lift.weight[side]=isDeload(week)?roundLoad(load*.9,v.increment):load;
       }
     }

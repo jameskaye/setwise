@@ -23,6 +23,7 @@ export const routineSchema=z.object({
     trainingMax:z.number().finite().positive().max(2000).optional(),
     trainingMaxOverride:z.number().finite().positive().max(2000).optional(),
     startingWeight:z.number().finite().min(0).max(2000).optional(),
+    loadOverride:z.number().finite().min(0).max(2000).optional(),
   }).strict()).max(140)}).strict().optional(),
 }).strict().refine(r=>new Set(r.workouts.map(w=>w.id)).size===r.workouts.length,'Use distinct workout IDs');
 export const saveRoutineSchema=z.object({requestId:identifier,expectedRevision:z.number().int().min(0),reason:z.string().trim().min(1).max(1000),routine:routineSchema}).strict();

@@ -71,6 +71,46 @@ test('accessories hold their load when the rep-out target is matched but not bea
   assert.equal(start(s,r).rules.program.lifts[0].weight.both,100);
  }
 });
+test('heavier-than-prescribed consistent load re-anchors the training max from the actual load',()=>{
+ const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'main',trainingMax:100};
+ const s=state(),session=start(s,r);
+ assert.equal(session.rules.program.lifts[0].weight.both,70);
+ for(let i=0;i<3;i++)log(s,session,'both',i===2?10:5,{weight:80});
+ finish(session);
+ const next=start(s,r),lift=next.rules.program.lifts[0];
+ assert.ok(Math.abs(lift.trainingMax.both-80/0.7)<1e-9,'re-anchored from actual 80 / 0.7');
+ assert.equal(lift.weight.both,85,'week 2 at 75% of the re-anchored max, rounded to equipment');
+});
+test('lighter-than-prescribed or mixed loads hold the training max',()=>{
+ const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'main',trainingMax:100};
+ { // lighter than prescribed
+  const s=state(),session=start(s,r);
+  for(let i=0;i<3;i++)log(s,session,'both',i===2?10:5,{weight:60});
+  finish(session);
+  assert.equal(start(s,r).rules.program.lifts[0].trainingMax.both,100);
+ }
+ { // ramped mid-lift
+  const s=state(),session=start(s,r);
+  log(s,session,'both',5,{weight:70});log(s,session,'both',5,{weight:75});log(s,session,'both',10,{weight:75});
+  finish(session);
+  assert.equal(start(s,r).rules.program.lifts[0].trainingMax.both,100);
+ }
+});
+test('accessory loadOverride raises the floor; earned progression continues above it',()=>{
+ const r=structuredClone(routine);
+ r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'accessory',loadOverride:95};
+ const s=state(),first=start(s,r);
+ for(let i=0;i<3;i++)log(s,first,'both',i===2?7:6,{weight:85});
+ finish(first);
+ let lift=start(s,r).rules.program.lifts[0];
+ assert.equal(lift.weight.both,95,'override floor applied');
+ assert.equal(lift.repOutTarget,6);
+ const second=s.sessions[s.sessions.length-1];
+ for(let i=0;i<3;i++)log(s,second,'both',i===2?7:6,{weight:95});
+ finish(second);
+ lift=start(s,r).rules.program.lifts[0];
+ assert.equal(lift.weight.both,100,'beating the target at the overridden load adds one increment');
+});
 test('accessory deloads halve sets with no rep-out target',()=>{
  const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'accessory'};
  const s=state();

@@ -45,22 +45,28 @@ test('left and right progress separately; undo removes the result; changed loads
  s.sets[2].weight=180;assert.equal(liftOutcome(session,lift,'left',s.sets).trainingMax,250);
  s.sets[2].weight=175;s.sets[0].painSeverity=1;assert.equal(liftOutcome(session,lift,'left',s.sets).trainingMax,250);
 });
-test('unknown load calibration, controlled recovery and accessory rep-out progression',()=>{
+test('unknown load calibration and rep-range progression for controlled and accessory lifts',()=>{
  for(const profile of ['main','controlled','accessory']){
   const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile};
   const s=state(),session=start(s,r);
   assert.equal(recommend(variant,session,s.sets,'both').weight,null);
   for(let i=0;i<3;i++)log(s,session,'both',profile==='main'?(i===2?10:5):profile==='accessory'?(i===2?7:6):6,{weight:100});
   finish(session);const next=start(s,r),lift=next.rules.program.lifts[0];
-  assert.equal(lift.repOutTarget,profile==='accessory'?6:profile==='main'?8:null);
-  assert.equal(lift.weight.both,profile==='main'?105:profile==='accessory'?105:100);
+  assert.equal(lift.repOutTarget,profile==='main'?8:6);
+  assert.equal(lift.weight.both,105);
  }
 });
-test('accessories hold their load when the rep-out target is matched but not beaten, or the session is incomplete',()=>{
+test('rep-range lifts progress when the final set reaches the target, and hold below it or when incomplete',()=>{
  const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'accessory'};
- { // matched exactly: hold
+ { // matched exactly: progress
   const s=state(),session=start(s,r);
   for(let i=0;i<3;i++)log(s,session,'both',6,{weight:100});
+  finish(session);
+  assert.equal(start(s,r).rules.program.lifts[0].weight.both,105);
+ }
+ { // below target: hold
+  const s=state(),session=start(s,r);
+  for(let i=0;i<3;i++)log(s,session,'both',i===2?5:6,{weight:100});
   finish(session);
   assert.equal(start(s,r).rules.program.lifts[0].weight.both,100);
  }

@@ -79,16 +79,25 @@ export function liftOutcome(session:Session,lift:ProgramLift,side:Side,sets:Logg
       :adapted?`All sets at ${actual} (heavier than prescribed ${prescribed}): training max re-anchored from the actual load${adjustment!==0?`; rep-out adjustment ${adjustment>0?'+':''}${Number((adjustment*100).toFixed(2))}%`:''}.`
       :lift.repOutTarget===null?'No rep-out adjustment.':`Final set ${work.at(-1)!.reps} / ${lift.repOutTarget}: training max ${adjustment>0?'+':''}${Number((adjustment*100).toFixed(2))}%.`};
 }
-export function buildProgramSession(routine:Routine,workoutId:string,state:Snapshot):ProgramSession|undefined {
+export function buildProgramSession(routine:Routine,workoutId:string,state:Snapshot,variantChoices:Record<string,string>={}):ProgramSession|undefined {
   if(!routine.program)return;
   const template=routine.workouts.find(w=>w.id===workoutId)!;
   const week=programWeek(routine,workoutId,state.sessions);
   if(week>21)throw new Error('This workout has completed all 21 weeks. Set up a new cycle before continuing.');
   const previous=state.sessions.filter(s=>s.status==='finished'&&s.rules.program?.id===routine.program!.id&&s.rules.program.workoutId===workoutId&&s.rules.program.advance)
     .sort((a,b)=>b.rules.program!.week-a.rules.program!.week)[0];
+  for(const from of Object.keys(variantChoices))if(!template.exercises.some(e=>e.variantId===from))throw new Error(`"${from}" is not an exercise in this workout.`);
   const lifts=template.exercises.map(p=>{
-    const v=state.variants.find(v=>v.id===p.variantId)!;
-    const config=routine.program!.lifts.find(l=>l.workoutId===workoutId&&l.variantId===p.variantId);
+    // Linked variants form one progression slot sharing a single training max:
+    // any linked variation can be performed in a given week, and its
+    // performance drives the shared training max for whichever variation is
+    // chosen next.
+    const group=[p.variantId,...(p.linkedVariants??[])];
+    const chosenId=variantChoices[p.variantId]??p.variantId;
+    if(!group.includes(chosenId))throw new Error(`"${chosenId}" is not a linked variation of "${p.variantId}".`);
+    const v=state.variants.find(v=>v.id===chosenId);
+    if(!v)throw new Error(`Unknown exercise variant: "${chosenId}".`);
+    const config=routine.program!.lifts.find(l=>l.workoutId===workoutId&&group.includes(l.variantId));
     const profile=config?.profile??'accessory';
     const rtf=profile==='main'||profile==='auxiliary';
     // Accessories and controlled lifts share rep-range progression: work sets
@@ -102,7 +111,7 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
       // deloads keep a fixed target with no automatic increase.
       repOutTarget:rtf&&!isDeload(week)?schedule[2]:repProgression&&!isDeload(week)?p.maxReps:null,intensity:rtf?schedule[0]:null,
       trainingMax:{},weight:{},increment:v.increment};
-    const old=previous?.rules.program?.lifts.find(l=>l.variantId===v.id&&l.profile===profile);
+    const old=previous?.rules.program?.lifts.find(l=>group.includes(l.variantId)&&l.profile===profile);
     for(const side of (v.unilateral?['left','right']:['both']) as Side[]){
       const outcome=old&&previous?liftOutcome(previous,old,side,state.sets):undefined;
       if(rtf){
@@ -115,11 +124,14 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
         if(tm){lift.trainingMax[side]=tm;lift.weight[side]=roundLoad(tm*lift.intensity!,v.increment);}
       }else{
         // Accessories progress between completed sessions, never from a guessed RIR.
-        // Ignore deloads when choosing their next normal working load.
+        // Ignore deloads when choosing their next normal working load. Linked
+        // variations share the slot, so the most recent session performing any
+        // of them drives the next load.
         const prior=state.sessions.filter(s=>s.status==='finished'&&s.rules.program?.id===routine.program!.id&&s.rules.program.workoutId===workoutId&&!isDeload(s.rules.program.week)&&s.rules.program.advance)
-          .sort((a,b)=>b.rules.program!.week-a.rules.program!.week).find(s=>workingSets(s,v.id,side,state.sets).length);
-        const work=prior?workingSets(prior,v.id,side,state.sets):[];
-        const oldLift=prior?.rules.program?.lifts.find(l=>l.variantId===v.id);
+          .sort((a,b)=>b.rules.program!.week-a.rules.program!.week).find(s=>group.some(id=>workingSets(s,id,side,state.sets).length));
+        const performedId=prior?group.find(id=>workingSets(prior,id,side,state.sets).length):undefined;
+        const work=prior&&performedId?workingSets(prior,performedId,side,state.sets):[];
+        const oldLift=prior?.rules.program?.lifts.find(l=>l.variantId===performedId);
         let load=work[0]?.weight??config?.startingWeight;
         // Rep-progression lifts use last-set rep-out progression: reach the target
         // on a clean, complete session and the load rises one equipment increment.

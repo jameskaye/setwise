@@ -142,4 +142,34 @@ test('without an override the chain still applies downward adjustments',()=>{
  const next=start(s);
  assert.equal(next.rules.program.lifts[0].trainingMax.both,245);
 });
+test('linked variations share one training max and can be swapped each week',()=>{
+ const smith={id:'smith',name:'Smith press',unilateral:0,increment:5,minReps:6,maxReps:10,defaultSets:4};
+ const ohp={id:'ohp',name:'Barbell OHP',unilateral:0,increment:5,minReps:6,maxReps:10,defaultSets:4};
+ const r={name:'test',notes:'',constraints:[],program:{id:'cycle',lifts:[{workoutId:'a',variantId:'smith',profile:'main',trainingMax:160}]},workouts:[{id:'a',exercises:[{variantId:'smith',linkedVariants:['ohp'],sets:4,minReps:6,maxReps:10,targetRir:1}]}]};
+ const st=()=>({variants:[smith,ohp],sessions:[],sets:[]});
+ const begin=(s,choices={})=>{const session={id:'session-'+s.sessions.length,status:'active',rules:{program:buildProgramSession(r,'a',s,choices)},plan:[choices.smith??'smith']};s.sessions.push(session);return session;};
+ const logAs=(s,session,vid,reps,weight)=>{s.sets.push({id:'set-'+s.sets.length,sessionId:session.id,variantId:vid,createdAt:s.sets.length,weight,reps,rir:0,side:'both',type:'working',painSeverity:0});};
+ const done=s=>{s.status='finished';s.rules.program.advance=true;};
+ const s=st();
+ // Week 1: smith press, final set 12 vs target 10 -> TM 160 -> 161.6
+ let session=begin(s),lift=session.rules.program.lifts[0];
+ assert.equal(lift.variantId,'smith');assert.equal(lift.weight.both,110);
+ for(let i=0;i<4;i++)logAs(s,session,'smith',i===3?12:5,lift.weight.both);
+ done(session);
+ // Week 2: choose the OHP; it inherits the bumped TM from the smith session
+ session=begin(s,{smith:'ohp'});lift=session.rules.program.lifts[0];
+ assert.equal(lift.variantId,'ohp');
+ assert.equal(lift.trainingMax.both,161.6,'linked variation inherits the shared training max');
+ assert.equal(lift.weight.both,120);
+ for(let i=0;i<4;i++)logAs(s,session,'ohp',i===3?10:4,lift.weight.both); // final 10 vs 8 -> +1%
+ done(session);
+ // Week 3: back to smith; the OHP performance bumped the shared TM
+ session=begin(s);lift=session.rules.program.lifts[0];
+ assert.equal(lift.variantId,'smith');
+ assert.equal(lift.trainingMax.both,163.216,'progress on one variation bumps the other');
+ assert.equal(lift.weight.both,130);
+ // Unknown choices are rejected
+ assert.throws(()=>begin(st(),{smith:'bench'}),/not a linked variation/);
+ assert.throws(()=>begin(st(),{squat:'ohp'}),/not an exercise in this workout/);
+});
 test.after(()=>rmSync(temp,{recursive:true,force:true}));

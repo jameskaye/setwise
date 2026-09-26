@@ -17,7 +17,7 @@ export const actionSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('delete_set'),setId:id}),
  z.object({action:z.literal('finish'),sessionId:id}),
  z.object({action:z.literal('abort'),sessionId:id}),
- z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30),workoutId:id.optional(),expectedRoutineRevision:z.number().int().min(0).optional()}),
+ z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30),workoutId:id.optional(),expectedRoutineRevision:z.number().int().min(0).optional(),variantChoices:z.record(id,id).optional()}),
  z.object({action:z.literal('session'),sessionId:id,name:z.string().trim().min(1).max(80),notes:z.string().max(4000),plan:z.array(id).min(1).max(30)}),
  z.object({action:z.literal('coach'),id:id,sessionId:id,variantId:id,message:z.string().trim().min(1).max(2000)}),
  z.object({action:z.literal('variant'),id:id,exerciseId:z.string().max(180),baseName:z.string().trim().max(80),name:z.string().trim().min(1).max(100),equipment:z.string().trim().min(1).max(100),unilateral:z.boolean(),loadMode:z.enum(['per leg','per dumbbell','total load','machine load']),increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)}),
@@ -121,10 +121,18 @@ export async function performWorkout(owner:string,input:unknown){try{
     if(saved&&!template)throw new InputError('Choose a workout from your saved routine.');
     if(saved?.routine.program&&template&&programWeek(saved.routine,template.id,state.sessions)>programWeek(saved.routine,nextProgramWorkout(saved.routine,state.sessions).id,state.sessions))throw new InputError('Finish the remaining workouts in this program week first.');
     if(saved?.routine.program&&template&&programWeek(saved.routine,template.id,state.sessions)>21)throw new InputError('You completed this 21-week cycle. Set up your next cycle before starting.');
-    const program=template&&saved?buildProgramSession(saved.routine,template.id,state):undefined;
+    const choices=a.variantChoices??{};
+    if(!template&&Object.keys(choices).length)throw new InputError('Variation choices need a routine workout.');
+    if(template)for(const [from,to] of Object.entries(choices)){
+      const ex=template.exercises.find(e=>e.variantId===from);
+      if(!ex)throw new InputError('Choose a variation for an exercise in this workout.');
+      if(!state.variants.some(v=>v.id===to))throw new InputError('Exercise variant not found.');
+      if(to!==from&&!(ex.linkedVariants??[]).includes(to))throw new InputError(`"${state.variants.find(v=>v.id===to)!.name}" is not a linked variation of "${state.variants.find(v=>v.id===from)!.name}".`);
+    }
+    const program=template&&saved?buildProgramSession(saved.routine,template.id,state,choices):undefined;
     const rules={...(template?.timeLimitMinutes?{deadline:now+template.timeLimitMinutes*60000}:{}),...(program?{program}:{}),...(template?.supersets?{supersets:template.supersets}:{})};
     const context=template?[template.notes,saved!.routine.notes,...saved!.routine.constraints].filter(Boolean).join('\n'):'';
-    await query('INSERT OR IGNORE INTO sessions (id,owner,name,started_at,ended_at,status,notes,plan,rules,prescriptions,routine_revision) VALUES (?,?,?,?,?,?,?,?,?,?,?)',a.id,owner,template?.name??a.name,now,null,'active',context,JSON.stringify(template?.exercises.map(e=>e.variantId)??a.plan),JSON.stringify(rules),JSON.stringify(template?.exercises??[]),saved?.revision??null).run();
+    await query('INSERT OR IGNORE INTO sessions (id,owner,name,started_at,ended_at,status,notes,plan,rules,prescriptions,routine_revision) VALUES (?,?,?,?,?,?,?,?,?,?,?)',a.id,owner,template?.name??a.name,now,null,'active',context,JSON.stringify(template?template.exercises.map(e=>choices[e.variantId]??e.variantId):a.plan),JSON.stringify(rules),JSON.stringify(template?template.exercises.map(e=>({...e,variantId:choices[e.variantId]??e.variantId})):[]),saved?.revision??null).run();
   } else if(a.action==='supersets'){
     if(a.supersets.flat().some(id=>!session!.plan.includes(id)))throw new InputError('Choose exercises in this workout.');
     if(JSON.stringify(session!.rules.supersets??[])===JSON.stringify(a.supersets))return reply(state);

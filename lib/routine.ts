@@ -7,13 +7,17 @@ export const supersetsSchema=z.array(z.tuple([identifier,identifier])).max(10).r
 export const prescriptionSchema=z.object({
   variantId:identifier,minReps:bounded,maxReps:bounded,
   sets:z.number().int().min(1).max(10),targetRir:z.number().int().min(0).max(3),
-}).strict().refine(v=>v.minReps<=v.maxReps,'Minimum reps cannot exceed maximum reps');
+  linkedVariants:z.array(identifier).max(5).optional(),
+}).strict().refine(v=>v.minReps<=v.maxReps,'Minimum reps cannot exceed maximum reps')
+ .refine(v=>!v.linkedVariants?.includes(v.variantId),'A linked variant cannot be the exercise itself')
+ .refine(v=>new Set(v.linkedVariants??[]).size===(v.linkedVariants??[]).length,'Linked variants must be distinct');
 export const workoutTemplateSchema=z.object({
   id:identifier,name:z.string().trim().min(1).max(80),notes:z.string().max(2000),
   timeLimitMinutes:z.number().int().min(5).max(180).nullable(),
   exercises:z.array(prescriptionSchema).min(1).max(20),
   supersets:supersetsSchema.optional(),
-}).strict().refine(w=>new Set(w.exercises.map(e=>e.variantId)).size===w.exercises.length,'Use distinct variants').refine(w=>(w.supersets??[]).flat().every(id=>w.exercises.some(e=>e.variantId===id)),'Superset exercises must be in the workout');
+}).strict().refine(w=>new Set(w.exercises.map(e=>e.variantId)).size===w.exercises.length,'Use distinct variants').refine(w=>(w.supersets??[]).flat().every(id=>w.exercises.some(e=>e.variantId===id)),'Superset exercises must be in the workout')
+ .refine(w=>{const ids=w.exercises.flatMap(e=>[e.variantId,...(e.linkedVariants??[])]);return new Set(ids).size===ids.length;},'Each variant can appear only once per workout, including as a linked variation');
 export const routineSchema=z.object({
   name:z.string().trim().min(1).max(80),notes:z.string().max(2000),
   constraints:z.array(z.string().trim().min(1).max(300)).max(15),

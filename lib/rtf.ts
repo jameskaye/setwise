@@ -88,17 +88,30 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
     .sort((a,b)=>b.rules.program!.week-a.rules.program!.week)[0];
   for(const from of Object.keys(variantChoices))if(!template.exercises.some(e=>e.variantId===from))throw new Error(`"${from}" is not an exercise in this workout.`);
   const lifts=template.exercises.map(p=>{
-    // Linked variants form one progression slot sharing a single training max:
-    // any linked variation can be performed in a given week, and its
-    // performance drives the shared training max for whichever variation is
-    // chosen next.
+    // Linked variants form one progression slot: any linked variation can be
+    // performed in a given week, and its performance drives the shared chain.
+    // Each variation keeps its own strength level, expressed as a ratio of the
+    // primary's training max, so a bump earned by one variation moves the
+    // others proportionally instead of forcing them all to one number.
     const group=[p.variantId,...(p.linkedVariants??[])];
     const chosenId=variantChoices[p.variantId]??p.variantId;
     if(!group.includes(chosenId))throw new Error(`"${chosenId}" is not a linked variation of "${p.variantId}".`);
     const v=state.variants.find(v=>v.id===chosenId);
     if(!v)throw new Error(`Unknown exercise variant: "${chosenId}".`);
-    const config=routine.program!.lifts.find(l=>l.workoutId===workoutId&&group.includes(l.variantId));
+    const slotConfigs=routine.program!.lifts.filter(l=>l.workoutId===workoutId&&group.includes(l.variantId));
+    const config=slotConfigs.find(l=>l.variantId===p.variantId)??slotConfigs[0];
     const profile=config?.profile??'accessory';
+    // A variation's seed training max: its own override (floor) or its own
+    // training max, else the slot's base. Overrides never leak across
+    // variations — each variation is floored only by its own override.
+    const seedOf=(vid:string)=>{
+      const c=slotConfigs.find(l=>l.variantId===vid);
+      return c?.trainingMaxOverride??c?.trainingMax??config?.trainingMax;
+    };
+    const ratioOf=(vid:string)=>{
+      const s=seedOf(vid),ref=seedOf(p.variantId);
+      return s!==undefined&&ref!==undefined&&ref!==0?s/ref:1;
+    };
     const rtf=profile==='main'||profile==='auxiliary';
     // Accessories and controlled lifts share rep-range progression: work sets
     // at the bottom of the range, last set rep-out at the top, +1 increment
@@ -115,12 +128,16 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
     for(const side of (v.unilateral?['left','right']:['both']) as Side[]){
       const outcome=old&&previous?liftOutcome(previous,old,side,state.sets):undefined;
       if(rtf){
-        // A training-max override in the saved routine raises the floor for future
-        // workouts; otherwise the session-to-session chain owns the value, so
-        // automatic adjustments (up and down) are unaffected.
-        const tm=config?.trainingMaxOverride!==undefined
-          ?Math.max(outcome?.trainingMax??0,config.trainingMaxOverride)
-          :(outcome?.trainingMax??config?.trainingMax);
+        // Normalize the previous outcome into primary-variant units, then
+        // scale to the chosen variation. A training-max override still raises
+        // the floor for its own variation only; automatic adjustments (up and
+        // down) are otherwise unaffected, and a bump on one variation moves
+        // the others by the same proportion.
+        const rP=old?ratioOf(old.variantId):1;
+        const chain=outcome?.trainingMax!==undefined?outcome.trainingMax/rP:seedOf(p.variantId);
+        let tm=chain!==undefined?chain*ratioOf(chosenId):undefined;
+        const floor=slotConfigs.find(l=>l.variantId===chosenId)?.trainingMaxOverride;
+        if(floor!==undefined)tm=tm===undefined?floor:Math.max(tm,floor);
         if(tm){lift.trainingMax[side]=tm;lift.weight[side]=roundLoad(tm*lift.intensity!,v.increment);}
       }else{
         // Accessories progress between completed sessions, never from a guessed RIR.

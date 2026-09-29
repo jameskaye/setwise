@@ -17,7 +17,7 @@ export async function saveRoutine(owner:string,input:unknown,state:Snapshot){
  if(a.routine.workouts.some(w=>w.exercises.some(e=>!state.variants.some(v=>v.id===e.variantId)||(e.linkedVariants??[]).some(id=>!state.variants.some(v=>v.id===id)))))throw new ApiError(400,'Unknown variant. Read the exercise catalog before changing the routine.');
  if(a.routine.program){
    const keys=a.routine.program.lifts.map(l=>l.workoutId+':'+l.variantId);
-   if(new Set(keys).size!==keys.length||a.routine.program.lifts.some(l=>!a.routine.workouts.find(w=>w.id===l.workoutId)?.exercises.some(e=>e.variantId===l.variantId)))throw new ApiError(400,'Program lifts must refer to distinct exercises in the saved workouts.');
+   if(new Set(keys).size!==keys.length||a.routine.program.lifts.some(l=>!a.routine.workouts.find(w=>w.id===l.workoutId)?.exercises.some(e=>e.variantId===l.variantId||(e.linkedVariants??[]).includes(l.variantId))))throw new ApiError(400,'Program lifts must refer to distinct exercises in the saved workouts.');
  }
  // One conditional INSERT performs the concurrency check and revision write atomically.
  const result=await database().batch([

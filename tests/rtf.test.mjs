@@ -172,4 +172,45 @@ test('linked variations share one training max and can be swapped each week',()=
  assert.throws(()=>begin(st(),{smith:'bench'}),/not a linked variation/);
  assert.throws(()=>begin(st(),{squat:'ohp'}),/not an exercise in this workout/);
 });
+test('linked variations keep their own training-max levels with proportional bumps',()=>{
+ const smith={id:'smith',name:'Smith press',unilateral:0,increment:5,minReps:6,maxReps:10,defaultSets:4};
+ const ohp={id:'ohp',name:'Barbell OHP',unilateral:0,increment:5,minReps:6,maxReps:10,defaultSets:4};
+ const r={name:'test',notes:'',constraints:[],program:{id:'cycle',lifts:[
+  {workoutId:'a',variantId:'smith',profile:'auxiliary',trainingMax:160,trainingMaxOverride:175},
+  {workoutId:'a',variantId:'ohp',profile:'auxiliary',trainingMax:160},
+ ]},workouts:[{id:'a',exercises:[{variantId:'smith',linkedVariants:['ohp'],sets:4,minReps:6,maxReps:10,targetRir:1}]}]};
+ const st=()=>({variants:[smith,ohp],sessions:[],sets:[]});
+ const begin=(s,choices={})=>{const session={id:'session-'+s.sessions.length,status:'active',rules:{program:buildProgramSession(r,'a',s,choices)},plan:[choices.smith??'smith']};s.sessions.push(session);return session;};
+ const logAs=(s,session,vid,reps,weight)=>{s.sets.push({id:'set-'+s.sets.length,sessionId:session.id,variantId:vid,createdAt:s.sets.length,weight,reps,rir:0,side:'both',type:'working',painSeverity:0});};
+ const done=s=>{s.status='finished';s.rules.program.advance=true;};
+ const approx=(a,b)=>assert.ok(Math.abs(a-b)<0.01,`expected ~${b}, got ${a}`);
+ const s=st();
+ // Week 1: smith programs at its own 175 floor -> 105; rep-out 15 vs 14 -> +0.5%
+ let session=begin(s),lift=session.rules.program.lifts[0];
+ assert.equal(lift.variantId,'smith');assert.equal(lift.trainingMax.both,175);assert.equal(lift.weight.both,105);
+ for(let i=0;i<4;i++)logAs(s,session,'smith',i===3?15:7,lift.weight.both);
+ done(session);
+ // Week 2: OHP sits ~10% under smith (160.8), never at the smith-only 175
+ session=begin(s,{smith:'ohp'});lift=session.rules.program.lifts[0];
+ assert.equal(lift.variantId,'ohp');
+ approx(lift.trainingMax.both,160.8);
+ assert.equal(lift.weight.both,105);
+ for(let i=0;i<4;i++)logAs(s,session,'ohp',i===3?16:6,lift.weight.both); // 16 vs 12 -> +2%
+ done(session);
+ // Week 3: back to smith; the OHP bump moved smith proportionally: 164.016/(160/175)=179.39
+ session=begin(s);lift=session.rules.program.lifts[0];
+ assert.equal(lift.variantId,'smith');
+ approx(lift.trainingMax.both,179.39);
+ assert.equal(lift.weight.both,125);
+ for(let i=0;i<4;i++)logAs(s,session,'smith',i===3?4:5,lift.weight.both); // 4 vs 10 -> -5%
+ done(session);
+ // Week 4: OHP drops proportionally with the weak smith session: 170.42*160/175=155.82
+ session=begin(s,{smith:'ohp'});lift=session.rules.program.lifts[0];
+ approx(lift.trainingMax.both,155.82);
+ for(let i=0;i<4;i++)logAs(s,session,'ohp',i===3?7:7,lift.weight.both); // 7 vs 13 -> -5%
+ done(session);
+ // Week 5: smith is floored at its own 175 override despite the weak chain
+ session=begin(s);lift=session.rules.program.lifts[0];
+ assert.equal(lift.trainingMax.both,175);
+});
 test.after(()=>rmSync(temp,{recursive:true,force:true}));

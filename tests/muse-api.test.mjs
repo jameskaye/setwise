@@ -215,6 +215,28 @@ test('Muse API: swap_variant force overrides guards on explicit command',async()
  const forced=ctx.activeSession.rules.program.lifts.find(l=>l.variantId==='swap-row');
  assert.equal(forced.modified,true,'non-linked forced swap holds progression');
  assert.equal((await post('/api/muse',{action:'finish',sessionId})).status,200);
+});
+
+test('Muse API: programmed sessions allow reordering but not lineup changes',async()=>{
+ const routine={name:'Reorder routine',notes:'',constraints:[],program:{id:'swap-cycle',lifts:[
+  {workoutId:'sw',variantId:'swap-smith',profile:'auxiliary',trainingMax:160},
+  {workoutId:'sw',variantId:'swap-ohp',profile:'auxiliary',trainingMax:160},
+ ]},workouts:[{id:'sw',name:'Swap day',notes:'',timeLimitMinutes:null,exercises:[
+  {variantId:'swap-smith',sets:4,minReps:6,maxReps:10,targetRir:1},
+  {variantId:'swap-ohp',sets:4,minReps:6,maxReps:10,targetRir:1},
+ ]}]};
+ const _dbg=await post('/api/muse',{action:'save_routine',requestId:crypto.randomUUID(),expectedRevision:1,reason:'reorder test',routine});
+ assert.equal(_dbg.status,200);
+ const sessionId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'start',id:sessionId,name:'Reorder day',plan:['swap-smith','swap-ohp'],workoutId:'sw',expectedRoutineRevision:2})).status,200);
+ // Reorder: same exercises, different order -> allowed.
+ assert.equal((await post('/api/muse',{action:'session',sessionId,name:'Reorder day',notes:'',plan:['swap-ohp','swap-smith']})).status,200);
+ const ctx=await (await get('/api/muse')).json();
+ assert.deepEqual(ctx.activeSession.plan,['swap-ohp','swap-smith']);
+ // Adding or removing exercises -> still rejected for programmed sessions.
+ assert.equal((await post('/api/muse',{action:'session',sessionId,name:'Reorder day',notes:'',plan:['swap-ohp']})).status,400);
+ assert.equal((await post('/api/muse',{action:'session',sessionId,name:'Reorder day',notes:'',plan:['swap-ohp','swap-smith','swap-row']})).status,400);
+ assert.equal((await post('/api/muse',{action:'finish',sessionId})).status,200);
 
  sql.close();rmSync(temp,{recursive:true,force:true});
 });

@@ -144,7 +144,13 @@ export async function performWorkout(owner:string,input:unknown){try{
   } else if(a.action==='save_routine'){
     const {action,...input}=a;await saveRoutine(owner,input,state);
   } else if(a.action==='session'){
-    if(session!.rules.program&&JSON.stringify(a.plan)!==JSON.stringify(session!.plan))throw new InputError('Keep the programmed lineup for this workout. Update the saved routine for future sessions.');
+    if(session!.rules.program){
+      // Programmed workouts keep their lineup, but the lifter may reorder it:
+      // a permutation of the same exercises is safe (lifts are keyed by
+      // variant, not position), while adding or removing exercises is not.
+      const sameSet=a.plan.length===session!.plan.length&&a.plan.every(id=>session!.plan.includes(id));
+      if(!sameSet)throw new InputError('Keep the programmed lineup for this workout. Update the saved routine for future sessions.');
+    }
     await query('UPDATE sessions SET name = ?, notes = ?, plan = ? WHERE id = ? AND owner = ?',a.name,a.notes,JSON.stringify(a.plan),a.sessionId,owner).run();}
   else if(a.action==='swap_variant'){
     // Swap one planned exercise for another mid-workout, preserving its

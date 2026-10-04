@@ -19,6 +19,7 @@ export const actionSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('abort'),sessionId:id}),
  z.object({action:z.literal('start'),id:id,name:z.string().trim().min(1).max(80),plan:z.array(id).min(1).max(30),workoutId:id.optional(),expectedRoutineRevision:z.number().int().min(0).optional(),variantChoices:z.record(id,id).optional()}),
  z.object({action:z.literal('session'),sessionId:id,name:z.string().trim().min(1).max(80),notes:z.string().max(4000),plan:z.array(id).min(1).max(30)}),
+ z.object({action:z.literal('swap_variant'),sessionId:id,from:id,to:id}),
  z.object({action:z.literal('coach'),id:id,sessionId:id,variantId:id,message:z.string().trim().min(1).max(2000)}),
  z.object({action:z.literal('variant'),id:id,exerciseId:z.string().max(180),baseName:z.string().trim().max(80),name:z.string().trim().min(1).max(100),equipment:z.string().trim().min(1).max(100),unilateral:z.boolean(),loadMode:z.enum(['per leg','per dumbbell','total load','machine load']),increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)}),
  z.object({action:z.literal('targets'),variantId:id,increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)})
@@ -145,6 +146,29 @@ export async function performWorkout(owner:string,input:unknown){try{
   } else if(a.action==='session'){
     if(session!.rules.program&&JSON.stringify(a.plan)!==JSON.stringify(session!.plan))throw new InputError('Keep the programmed lineup for this workout. Update the saved routine for future sessions.');
     await query('UPDATE sessions SET name = ?, notes = ?, plan = ? WHERE id = ? AND owner = ?',a.name,a.notes,JSON.stringify(a.plan),a.sessionId,owner).run();}
+  else if(a.action==='swap_variant'){
+    // Swap one planned exercise for a linked variation mid-workout, preserving
+    // its programmed targets, training max, and progression. The swap is
+    // transparent to the linked chain: the slot keeps its identity, only the
+    // performed variation changes.
+    if(!session!.plan.includes(a.from))throw new InputError('That exercise is not in this workout.');
+    if(session!.plan.includes(a.to))throw new InputError('That variation is already in this workout.');
+    if(!state.variants.some(v=>v.id===a.to))throw new InputError('Exercise variant not found.');
+    if(state.sets.some(s=>s.sessionId===session!.id&&s.variantId===a.from))throw new InputError('Sets are already logged for that exercise. Undo them or finish it as planned before swapping.');
+    const routine=await latestRoutine(owner);
+    const template=routine?.routine.workouts.find(w=>w.id===session!.rules.program?.workoutId);
+    const exercise=template?.exercises.find(e=>e.variantId===a.from||(e.linkedVariants??[]).includes(a.from));
+    const group=exercise?[exercise.variantId,...(exercise.linkedVariants??[])]:[];
+    if(a.to===a.from||!group.includes(a.to))throw new InputError('That is not a linked variation of this exercise.');
+    const plan=session!.plan.map(v=>v===a.from?a.to:v);
+    const prescriptions=(session!.prescriptions??[]).map(p=>p.variantId===a.from?{...p,variantId:a.to}:p);
+    const rules={...session!.rules};
+    if(rules.skipped)rules.skipped=rules.skipped.map(v=>v===a.from?a.to:v);
+    if(rules.supersets)rules.supersets=rules.supersets.map(pair=>pair.map(v=>v===a.from?a.to:v) as [string,string]);
+    if(rules.program)rules.program={...rules.program,lifts:rules.program.lifts.map(l=>l.variantId===a.from?{...l,variantId:a.to}:l)};
+    const result=await query("UPDATE sessions SET plan = ?, prescriptions = ?, rules = ? WHERE id = ? AND owner = ? AND status = 'active' AND plan = ? AND prescriptions = ? AND rules = ?",
+      JSON.stringify(plan),JSON.stringify(prescriptions),JSON.stringify(rules),session!.id,owner,JSON.stringify(session!.plan),JSON.stringify(session!.prescriptions??[]),JSON.stringify(session!.rules)).run();
+    if(!result.meta.changes)throw new ApiError(409,'Workout changed. Reload before swapping.');}
   else if(a.action==='coach'){
     if(state.messages.some(m=>m.id===a.id))return reply(state);
     const result=interpretCoach(a.message,session!.rules,state.variants,a.variantId,now);

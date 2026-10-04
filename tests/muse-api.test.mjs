@@ -141,6 +141,48 @@ test('Muse API: credential isolation, today workout, logging, apply, history',as
  assert.equal(ctx.activeSession,null);
  const done=await (await get('/api/muse/history?kind=sessions')).json();
  assert.ok(done.items.some(s=>s.id===sessionId&&s.status==='finished'));
+});
+
+test('Muse API: swap_variant exchanges a linked variation mid-workout',async()=>{
+ const mkVariant=(id,name)=>post('/api/muse',{action:'variant',id,exerciseId:'',baseName:'Press',name,equipment:'Machine',unilateral:false,loadMode:'machine load',increment:5,minReps:6,maxReps:10,defaultSets:4});
+ assert.equal((await mkVariant('swap-smith','Swap Smith Press')).status,200);
+ assert.equal((await mkVariant('swap-ohp','Swap OHP')).status,200);
+ const routine={name:'Swap routine',notes:'',constraints:[],program:{id:'swap-cycle',lifts:[{workoutId:'sw',variantId:'swap-smith',profile:'auxiliary',trainingMax:160}]},workouts:[{id:'sw',name:'Swap day',notes:'',timeLimitMinutes:null,exercises:[{variantId:'swap-smith',linkedVariants:['swap-ohp'],sets:4,minReps:6,maxReps:10,targetRir:1}]}]};
+ assert.equal((await post('/api/muse',{action:'save_routine',requestId:crypto.randomUUID(),expectedRevision:0,reason:'swap test',routine})).status,200);
+ const sessionId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'start',id:sessionId,name:'Swap day',plan:['swap-smith'],workoutId:'sw',expectedRoutineRevision:1})).status,200);
+ let ctx=await (await get('/api/muse')).json();
+ const before=ctx.activeSession.rules.program.lifts[0];
+ assert.equal(before.variantId,'swap-smith');
+ assert.ok(before.trainingMax.both>0,'programmed training max present');
+ const weightBefore=before.weight.both;
+
+ // Swap to the linked alternate: plan, prescriptions, and program lift follow,
+ // while the programmed training max, weight, and profile are preserved.
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-smith',to:'swap-ohp'})).status,200);
+ ctx=await (await get('/api/muse')).json();
+ assert.deepEqual(ctx.activeSession.plan,['swap-ohp']);
+ assert.equal(ctx.activeSession.prescriptions[0].variantId,'swap-ohp');
+ const after=ctx.activeSession.rules.program.lifts[0];
+ assert.equal(after.variantId,'swap-ohp');
+ assert.equal(after.profile,'auxiliary');
+ assert.equal(after.trainingMax.both,before.trainingMax.both,'training max preserved across the swap');
+ assert.equal(after.weight.both,weightBefore,'programmed weight preserved across the swap');
+ assert.equal(after.modified,undefined,'swap is transparent to progression, not a modification');
+
+ // Guards: unknown target, non-linked target, duplicate, and logged sets.
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-ohp',to:'nope'})).status,400);
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-ohp',to:'swap-ohp'})).status,400);
+ // Log a set for the new variant, then swapping away is refused.
+ const setId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'log',id:setId,sessionId,variantId:'swap-ohp',weight:weightBefore,reps:7,rir:1,side:'both',type:'working',painLocation:'',painSeverity:0,note:''})).status,200);
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-ohp',to:'swap-smith'})).status,400,'sets logged: swap refused');
+ // Swapping back is fine once the set is undone.
+ assert.equal((await post('/api/muse',{action:'undo',setId,sessionId})).status,200);
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-ohp',to:'swap-smith'})).status,200);
+ ctx=await (await get('/api/muse')).json();
+ assert.deepEqual(ctx.activeSession.plan,['swap-smith']);
+ assert.equal((await post('/api/muse',{action:'finish',sessionId})).status,200);
 
  sql.close();rmSync(temp,{recursive:true,force:true});
 });

@@ -183,6 +183,38 @@ test('Muse API: swap_variant exchanges a linked variation mid-workout',async()=>
  ctx=await (await get('/api/muse')).json();
  assert.deepEqual(ctx.activeSession.plan,['swap-smith']);
  assert.equal((await post('/api/muse',{action:'finish',sessionId})).status,200);
+});
+
+test('Muse API: swap_variant force overrides guards on explicit command',async()=>{
+ // Force swap with logged sets: the sets move to the new variant.
+ let sessionId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'start',id:sessionId,name:'Force swap day',plan:['swap-smith'],workoutId:'sw',expectedRoutineRevision:1})).status,200);
+ let ctx=await (await get('/api/muse')).json();
+ const weight=ctx.activeSession.rules.program.lifts[0].weight.both;
+ const setId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'log',id:setId,sessionId,variantId:'swap-smith',weight,reps:7,rir:1,side:'both',type:'working',painLocation:'',painSeverity:0,note:''})).status,200);
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-smith',to:'swap-ohp'})).status,400,'without force: refused');
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-smith',to:'swap-ohp',force:true})).status,200);
+ ctx=await (await get('/api/muse')).json();
+ assert.deepEqual(ctx.activeSession.plan,['swap-ohp']);
+ const hist=await (await get('/api/muse/history?kind=sets&sessionId='+sessionId)).json();
+ assert.ok(hist.items.some(s=>s.id===setId&&s.variantId==='swap-ohp'),'logged set moved to the new variant');
+ const lift=ctx.activeSession.rules.program.lifts[0];
+ assert.equal(lift.variantId,'swap-ohp');
+ assert.equal(lift.modified,undefined,'linked swap stays transparent even when forced');
+ assert.equal((await post('/api/muse',{action:'finish',sessionId})).status,200);
+
+ // Force swap to a non-linked variation: allowed, but the lift is marked
+ // modified so automatic progression holds instead of misattributing.
+ assert.equal((await post('/api/muse',{action:'variant',id:'swap-row',exerciseId:'',baseName:'Row',name:'Swap Row',equipment:'Barbell',unilateral:false,loadMode:'total load',increment:5,minReps:6,maxReps:10,defaultSets:4})).status,200);
+ sessionId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'start',id:sessionId,name:'Force swap day 2',plan:['swap-smith'],workoutId:'sw',expectedRoutineRevision:1})).status,200);
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-smith',to:'swap-row'})).status,400,'without force: refused');
+ assert.equal((await post('/api/muse',{action:'swap_variant',sessionId,from:'swap-smith',to:'swap-row',force:true})).status,200);
+ ctx=await (await get('/api/muse')).json();
+ const forced=ctx.activeSession.rules.program.lifts.find(l=>l.variantId==='swap-row');
+ assert.equal(forced.modified,true,'non-linked forced swap holds progression');
+ assert.equal((await post('/api/muse',{action:'finish',sessionId})).status,200);
 
  sql.close();rmSync(temp,{recursive:true,force:true});
 });

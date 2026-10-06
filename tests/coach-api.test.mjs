@@ -97,7 +97,7 @@ test('mobile auth, deterministic logging, validated coach proposals, apply/retry
   data=await read();assert.equal(JSON.stringify(data.sessions.find(s=>s.id===programmed.id).rules.program),priorProgram);assert.equal(JSON.stringify(data.sets),priorSets);
   let last;
   for(const side of ['left','right'])for(let i=0;i<2;i++){
-   last={...logged,id:crypto.randomUUID(),sessionId:programmed.id,weight:70,reps:i===0?5:side==='left'?12:9,rir:null,side};
+   last={...logged,id:crypto.randomUUID(),sessionId:programmed.id,weight:70,reps:side==='left'?10:(i===0?10:9),rir:null,side};
    assert.equal((await post(last)).status,200);
   }
   assert.equal((await post(last)).status,200,'lost response retry has no duplicate');
@@ -115,7 +115,7 @@ test('mobile auth, deterministic logging, validated coach proposals, apply/retry
   assert.equal((await post({action:'finish',sessionId:programmed.id})).status,200);
   assert.equal((await begin('a')).status,200);data=await read();programmed=data.sessions.find(s=>s.status==='active');
   assert.equal(programmed.rules.program.week,2);
-  assert.equal(programmed.rules.program.lifts[0].trainingMax.left,101);
-  assert.equal(programmed.rules.program.lifts[0].trainingMax.right,98);
+  assert.equal(programmed.rules.program.lifts[0].trainingMax.left,105);
+  assert.equal(programmed.rules.program.lifts[0].trainingMax.right,100);
  }finally{globalThis.fetch=originalFetch;sql.close();rmSync(temp,{recursive:true,force:true});}
 });

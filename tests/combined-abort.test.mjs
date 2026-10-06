@@ -20,11 +20,11 @@ test('combined entries persist once, progress both sides, and abort removes only
  assert.equal((await log('discard-me','late',5)).status,400,'late/retried sets cannot restore a discarded session');
  s=await read();for(const field of ['sessions','sets','progressions','messages'])assert.equal(s[field].length,0,field);assert.deepEqual(s.routine,planBefore);assert.equal(h.sql.prepare('SELECT count(*) n FROM coach_requests').get().n,0);
  await start('keep-me');s=await read();assert.equal(s.sessions[0].rules.program.week,1);
- await log('keep-me','normal',5);await log('keep-me','repout',12);
+ await log('keep-me','normal',10);await log('keep-me','normal2',10);
  assert.equal((await post({action:'finish',sessionId:'keep-me'})).status,200);
  const kept=(await read()).sets;
  assert.equal((await post({action:'abort',sessionId:'keep-me'})).status,400,'finished history cannot be discarded');
- await start('week-two');s=await read();const program=s.sessions.find(s=>s.id==='week-two').rules.program;assert.equal(program.week,2);assert.equal(program.lifts[0].trainingMax.left,101);assert.equal(program.lifts[0].trainingMax.right,101);
+ await start('week-two');s=await read();const program=s.sessions.find(s=>s.id==='week-two').rules.program;assert.equal(program.week,2);assert.equal(program.lifts[0].trainingMax.left,105);assert.equal(program.lifts[0].trainingMax.right,105);
  assert.equal((await post({action:'abort',sessionId:'week-two'})).status,200);assert.deepEqual((await read()).sets,kept);
  await start('week-two-retry');s=await read();assert.equal(s.sessions.find(s=>s.status==='active').rules.program.week,2);
  const partnerKey=(await (await h.call('/api/account',cookie,{action:'create_partner',name:'Partner'})).json()).key;

@@ -38,12 +38,12 @@ test('private accounts preserve the owner, isolate workouts and revoke replaced 
  assert.equal((await call('/api/workout',member,save)).status,200);
  assert.equal((await call('/api/workout',member,{action:'start',id:'member-session',name:'A',plan:[mv.id],workoutId:'a',expectedRoutineRevision:1})).status,200);
  state=await (await call('/api/workout',member)).json();assert.equal(state.sessions[0].rules.program.lifts[0].weight.both,70);
- const memberSet={...set,id:'member-set',sessionId:'member-session',variantId:mv.id,weight:70,reps:5,side:'both',rir:null,note:''};
+ const memberSet={...set,id:'member-set',sessionId:'member-session',variantId:mv.id,weight:70,reps:10,side:'both',rir:null,note:''};
  assert.equal((await call('/api/workout',member,memberSet)).status,200);
- assert.equal((await call('/api/workout',member,{...memberSet,id:'member-repout',reps:12})).status,200);
+ assert.equal((await call('/api/workout',member,{...memberSet,id:'member-set2',reps:10})).status,200);
  assert.equal((await call('/api/workout',member,{action:'finish',sessionId:'member-session'})).status,200);
  assert.equal((await call('/api/workout',member,{action:'start',id:'member-week2',name:'A',plan:[mv.id],workoutId:'a',expectedRoutineRevision:1})).status,200);
- state=await (await call('/api/workout',member)).json();const next=state.sessions.find(s=>s.status==='active').rules.program;assert.equal(next.week,2);assert.equal(next.lifts[0].trainingMax.both,101);
+ state=await (await call('/api/workout',member)).json();const next=state.sessions.find(s=>s.status==='active').rules.program;assert.equal(next.week,2);assert.equal(next.lifts[0].trainingMax.both,105);
  const exported=await (await call('/api/export',member)).json();assert.ok(exported.data.sets.every(s=>s.id!==set.id));assert.equal(JSON.stringify(exported).includes('Private owner note'),false);
  assert.equal((await (await call('/api/coach',member)).json()).proposals.length,0);
  assert.equal((await call('/api/workout',member.replace(/member-[^.]+/,'original-owner'))).status,401,'owner in cookie cannot be forged');

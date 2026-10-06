@@ -24,7 +24,7 @@ export interface ProgramLift {
   modified?:boolean;variantId:string; profile:'main'|'auxiliary'|'accessory'|'controlled';
   sets:number; reps:number; maxReps:number; repOutTarget:number|null;
   intensity:number|null; trainingMax:Partial<Record<Side,number>>;
-  weight:Partial<Record<Side,number>>; increment:number;
+  weight:Partial<Record<Side,number>>; increment:number; isDeload?:boolean;
 }
 export interface ProgramSession {id:string;workoutId:string;week:number;advance?:boolean;lifts:ProgramLift[];}
 export function programWeek(routine:Routine,workoutId:string,sessions:Session[]){
@@ -68,16 +68,21 @@ export function liftOutcome(session:Session,lift:ProgramLift,side:Side,sets:Logg
   const load=adapted?actual:(prescribed??actual);
   const tm=adapted&&lift.intensity&&actual!==undefined?actual/lift.intensity
     :(lift.trainingMax[side]??(lift.intensity&&load?load/lift.intensity:undefined));
+  // Double progression: all working sets must hit the rep target. Clear every
+  // set on a complete, unmodified, pain-free, non-deload session → +1
+  // equipment increment on the training max. Anything else holds.
   const valid=!lift.modified&&consistent&&work.length===lift.sets&&load!==undefined
     &&work.every(s=>s.painSeverity===0)
-    &&work.slice(0,-1).every(s=>s.reps>=lift.reps)&&!session.rules.easy&&!session.rules.skipped?.includes(lift.variantId)
+    &&work.every(s=>s.reps>=lift.reps)&&!session.rules.easy&&!session.rules.skipped?.includes(lift.variantId)
     &&session.rules.maxSets===undefined&&session.rules.minReps===undefined&&session.rules.maxReps===undefined
     &&(adapted||prescribed===undefined||actual===prescribed);
-  const adjustment=valid&&lift.repOutTarget!==null?rtfAdjustment(work.at(-1)!.reps,lift.repOutTarget):0;
-  return {trainingMax:tm===undefined?undefined:tm*(1+adjustment),adjustment,valid,load,
+  const progression=valid&&!lift.isDeload?lift.increment:0;
+  const newTm=tm===undefined?undefined:tm+progression;
+  return {trainingMax:newTm,adjustment:progression,valid,load,
     reason:!valid?'Incomplete, changed-load, modified, or painful work: training max held.'
-      :adapted?`All sets at ${actual} (heavier than prescribed ${prescribed}): training max re-anchored from the actual load${adjustment!==0?`; rep-out adjustment ${adjustment>0?'+':''}${Number((adjustment*100).toFixed(2))}%`:''}.`
-      :lift.repOutTarget===null?'No rep-out adjustment.':`Final set ${work.at(-1)!.reps} / ${lift.repOutTarget}: training max ${adjustment>0?'+':''}${Number((adjustment*100).toFixed(2))}%.`};
+      :adapted?`All sets at ${actual} (heavier than prescribed ${prescribed}): training max re-anchored from the actual load${progression!==0?`; double-progression +${progression}`:''}.`
+      :lift.isDeload?'Deload week: training max held.'
+      :progression!==0?`All ${work.length} sets hit ${lift.reps} reps: training max +${progression}.`:'Not all sets hit the rep target: training max held.'};
 }
 export function buildProgramSession(routine:Routine,workoutId:string,state:Snapshot,variantChoices:Record<string,string>={}):ProgramSession|undefined {
   if(!routine.program)return;
@@ -119,11 +124,12 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
     const repProgression=profile==='accessory'||profile==='controlled';
     const schedule=(profile==='main'?RTF_MAIN:RTF_AUXILIARY)[week-1];
     const lift:ProgramLift={variantId:v.id,profile,sets:rtf?p.sets:isDeload(week)?Math.max(1,Math.ceil(p.sets/2)):p.sets,
-      reps:rtf?schedule[1]:p.minReps,maxReps:rtf?schedule[1]:p.maxReps,
-      // Rep-progression lifts get a last-set rep-out at the top of their range;
+      reps:rtf?(isDeload(week)?schedule[1]:schedule[2]):p.minReps,maxReps:rtf?(isDeload(week)?schedule[1]:schedule[2]):p.maxReps,
+      // Main/auxiliary use straight sets (no rep-out); accessories and
+      // controlled lifts get a last-set rep-out at the top of their range;
       // deloads keep a fixed target with no automatic increase.
-      repOutTarget:rtf&&!isDeload(week)?schedule[2]:repProgression&&!isDeload(week)?p.maxReps:null,intensity:rtf?schedule[0]:null,
-      trainingMax:{},weight:{},increment:v.increment};
+      repOutTarget:!rtf&&repProgression&&!isDeload(week)?p.maxReps:null,intensity:rtf?schedule[0]:null,
+      trainingMax:{},weight:{},increment:v.increment,isDeload:rtf?isDeload(week):undefined};
     const old=previous?.rules.program?.lifts.find(l=>group.includes(l.variantId)&&l.profile===profile);
     for(const side of (v.unilateral?['left','right']:['both']) as Side[]){
       const outcome=old&&previous?liftOutcome(previous,old,side,state.sets):undefined;
@@ -174,13 +180,13 @@ export function programRecommendation(v:Variant,session:Session,sets:LoggedSet[]
   const final=lift.repOutTarget!==null&&count===lift.sets-1;
   const base={min:lift.reps,max:lift.maxReps,targetRir:0,reps:final?lift.repOutTarget!:lift.reps,weight,status:'ready' as Recommendation['status'],label:final?'Final set · rep out':isDeload(program.week)?'Deload set':'Prescribed set',program:true,repOut:final};
   if(type==='warmup')return {...base,weight:weight===null?null:roundLoad(weight*.55,lift.increment),label:'Warmup',repOut:false,reason:'Light rehearsal. Warmups do not affect the program.'};
-  if(type!=='working')return {...base,status:'pause',label:'Use working sets',reason:'Use Working for the prescribed sets; only the final prescribed working set drives RTF progression.'};
+  if(type!=='working')return {...base,status:'pause',label:'Use working sets',reason:'Use Working for the prescribed sets; only completed working sets drive progression.'};
   if(count>=lift.sets)return {...base,status:'complete',label:'Target complete',reason:liftOutcome(session,lift,side,sets).reason};
   if(session.rules.easy)return {...base,repOut:false,weight:weight===null?null:roundLoad(weight*.9,lift.increment),reps:lift.reps,label:'Easy workout',reason:'Rep-out progression is held for this modified workout. Keep the effort comfortable.'};
   return {...base,status:weight===null?'calibrate':'ready',reason:weight===null?
     `Choose a familiar light working load. The first working set anchors this side's load; ${lift.repOutTarget===null?'build clean reps.':'the final set is your rep-out set.'}`:
-    final?(lift.profile==='main'||lift.profile==='auxiliary'
-      ?`Aim for ${lift.repOutTarget} clean reps, stopping with 1-2 reps in reserve. Record actual reps and how many you had left; the >= trigger still applies.`
-      :`Aim to match or beat ${lift.repOutTarget} clean reps. Stop when another full rep with good form is not possible. Record actual reps; RIR is not required.`):
-    `Week ${program.week}: ${lift.sets} sets${v.unilateral?' per side':''}, ${lift.reps}${lift.reps!==lift.maxReps?'–'+lift.maxReps:''} reps${lift.repOutTarget!==null?`, then ${lift.repOutTarget}+ on the final set`:''}. ${lift.profile==='controlled'?'Keep the tempo controlled; reaching the final-set target raises the load next session.':'Weight stays fixed within this workout.'}`};
+    final?`Aim to match or beat ${lift.repOutTarget} clean reps. Stop when another full rep with good form is not possible. Record actual reps; RIR is not required.`:
+    (lift.profile==='main'||lift.profile==='auxiliary')
+      ?`Week ${program.week}: ${lift.sets} sets${v.unilateral?' per side':''} of ${lift.reps} reps at 1-2 RIR. Every set should feel hard but not maximal. Complete all ${lift.sets} sets to add ${lift.increment} lbs to your training max next week.`
+      :`Week ${program.week}: ${lift.sets} sets${v.unilateral?' per side':''}, ${lift.reps}${lift.reps!==lift.maxReps?'–'+lift.maxReps:''} reps${lift.repOutTarget!==null?`, then ${lift.repOutTarget}+ on the final set`:''}. ${lift.profile==='controlled'?'Keep the tempo controlled; reaching the final-set target raises the load next session.':'Weight stays fixed within this workout.'}`};
 }

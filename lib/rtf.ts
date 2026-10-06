@@ -179,6 +179,8 @@ export function programRecommendation(v:Variant,session:Session,sets:LoggedSet[]
   if(session.rules.easy)return {...base,repOut:false,weight:weight===null?null:roundLoad(weight*.9,lift.increment),reps:lift.reps,label:'Easy workout',reason:'Rep-out progression is held for this modified workout. Keep the effort comfortable.'};
   return {...base,status:weight===null?'calibrate':'ready',reason:weight===null?
     `Choose a familiar light working load. The first working set anchors this side's load; ${lift.repOutTarget===null?'build clean reps.':'the final set is your rep-out set.'}`:
-    final?`Aim to match or beat ${lift.repOutTarget} clean reps. Stop when another full rep with good form is not possible. Record actual reps; RIR is not required.`:
+    final?(lift.profile==='main'||lift.profile==='auxiliary'
+      ?`Aim for ${lift.repOutTarget} clean reps, stopping with 1-2 reps in reserve. Record actual reps and how many you had left; the >= trigger still applies.`
+      :`Aim to match or beat ${lift.repOutTarget} clean reps. Stop when another full rep with good form is not possible. Record actual reps; RIR is not required.`):
     `Week ${program.week}: ${lift.sets} sets${v.unilateral?' per side':''}, ${lift.reps}${lift.reps!==lift.maxReps?'–'+lift.maxReps:''} reps${lift.repOutTarget!==null?`, then ${lift.repOutTarget}+ on the final set`:''}. ${lift.profile==='controlled'?'Keep the tempo controlled; reaching the final-set target raises the load next session.':'Weight stays fixed within this workout.'}`};
 }

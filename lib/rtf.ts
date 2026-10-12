@@ -178,7 +178,7 @@ export function programRecommendation(v:Variant,session:Session,sets:LoggedSet[]
   const work=workingSets(session,v.id,side,sets),count=work.length;
   const weight=work.at(-1)?.weight??lift.weight[side]??null;
   const final=lift.repOutTarget!==null&&count===lift.sets-1;
-  const base={min:lift.reps,max:lift.maxReps,targetRir:0,reps:final?lift.repOutTarget!:lift.reps,weight,status:'ready' as Recommendation['status'],label:final?'Final set · rep out':isDeload(program.week)?'Deload set':'Prescribed set',program:true,repOut:final};
+  const base={min:lift.reps,max:lift.maxReps,targetRir:0,profile:lift.profile,reps:final?lift.repOutTarget!:lift.reps,weight,status:'ready' as Recommendation['status'],label:final?'Final set · rep out':isDeload(program.week)?'Deload set':'Prescribed set',program:true,repOut:final};
   if(type==='warmup')return {...base,weight:weight===null?null:roundLoad(weight*.55,lift.increment),label:'Warmup',repOut:false,reason:'Light rehearsal. Warmups do not affect the program.'};
   if(type!=='working')return {...base,status:'pause',label:'Use working sets',reason:'Use Working for the prescribed sets; only completed working sets drive progression.'};
   if(count>=lift.sets)return {...base,status:'complete',label:'Target complete',reason:liftOutcome(session,lift,side,sets).reason};

@@ -60,26 +60,41 @@ export function liftOutcome(session:Session,lift:ProgramLift,side:Side,sets:Logg
   const work=workingSets(session,lift.variantId,side,sets);
   const prescribed=lift.weight[side];
   const actual=work[0]?.weight;
-  // Every working set at one load is a clean read. When that load is heavier
-  // than prescribed, re-anchor the training max from what was actually lifted
-  // instead of holding. Lighter or mixed loads still hold.
   const consistent=work.length>0&&work.every(s=>s.weight===actual);
+  const complete=work.length===lift.sets;
+  const clean=!lift.modified&&!session.rules.easy&&!session.rules.skipped?.includes(lift.variantId)
+    &&session.rules.maxSets===undefined&&session.rules.minReps===undefined&&session.rules.maxReps===undefined
+    &&work.every(s=>s.painSeverity===0);
+  // Every working set at one load is a clean read. Re-anchor the training max
+  // from actual performance (Epley estimate from the best set) when that load
+  // differs from prescribed: up when heavier, down when lighter with every
+  // set missing the rep target (clear evidence the max is too high). Mixed
+  // loads, or lighter loads with reps hit, still hold.
   const adapted=consistent&&prescribed!==undefined&&actual!==undefined&&actual>prescribed;
+  const underloaded=consistent&&complete&&clean&&!lift.isDeload
+    &&prescribed!==undefined&&actual!==undefined&&actual<prescribed
+    &&work.every(s=>s.reps<lift.reps);
   const load=adapted?actual:(prescribed??actual);
-  const tm=adapted&&lift.intensity&&actual!==undefined?actual/lift.intensity
-    :(lift.trainingMax[side]??(lift.intensity&&load?load/lift.intensity:undefined));
+  let tm:number|undefined;
+  let reanchored: 'up'|'down'|null=null;
+  if((adapted||underloaded)&&lift.intensity&&actual!==undefined){
+    const reps=Math.max(...work.map(s=>s.reps));
+    tm=actual*(1+reps/30);
+    reanchored=adapted?'up':'down';
+  }else{
+    tm=lift.trainingMax[side]??(lift.intensity&&load?load/lift.intensity:undefined);
+  }
   // Double progression: all working sets must hit the rep target. Clear every
   // set on a complete, unmodified, pain-free, non-deload session → +1
   // equipment increment on the training max. Anything else holds.
-  const valid=!lift.modified&&consistent&&work.length===lift.sets&&load!==undefined
-    &&work.every(s=>s.painSeverity===0)
-    &&work.every(s=>s.reps>=lift.reps)&&!session.rules.easy&&!session.rules.skipped?.includes(lift.variantId)
-    &&session.rules.maxSets===undefined&&session.rules.minReps===undefined&&session.rules.maxReps===undefined
+  const valid=clean&&consistent&&complete&&load!==undefined
+    &&work.every(s=>s.reps>=lift.reps)
     &&(adapted||prescribed===undefined||actual===prescribed);
   const progression=valid&&!lift.isDeload?lift.increment:0;
   const newTm=tm===undefined?undefined:tm+progression;
   return {trainingMax:newTm,adjustment:progression,valid,load,
-    reason:!valid?'Incomplete, changed-load, modified, or painful work: training max held.'
+    reason:reanchored==='down'?`All sets at ${actual} (lighter than prescribed ${prescribed}) with reps short of the ${lift.reps} target: training max re-anchored down from actual performance.`
+      :!valid?'Incomplete, changed-load, modified, or painful work: training max held.'
       :adapted?`All sets at ${actual} (heavier than prescribed ${prescribed}): training max re-anchored from the actual load${progression!==0?`; double-progression +${progression}`:''}.`
       :lift.isDeload?'Deload week: training max held.'
       :progression!==0?`All ${work.length} sets hit ${lift.reps} reps: training max +${progression}.`:'Not all sets hit the rep target: training max held.'};

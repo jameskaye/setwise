@@ -104,8 +104,42 @@ test('heavier-than-prescribed consistent load re-anchors the training max from t
  for(let i=0;i<3;i++)log(s,session,'both',i===2?10:8,{weight:80});
  finish(session);
  const next=start(s,r),lift=next.rules.program.lifts[0];
- assert.ok(Math.abs(lift.trainingMax.both-80/0.7)<1e-9,'re-anchored from actual 80 / 0.7');
- assert.equal(lift.weight.both,85,'week 2 at 75% of the re-anchored max, rounded to equipment');
+ // Epley from the best set (80x10): honest re-anchor, no overshoot from 80/0.7.
+ assert.ok(Math.abs(lift.trainingMax.both-80*(1+10/30))<1e-9,'re-anchored from actual 80x10 via Epley');
+ assert.equal(lift.weight.both,80,'week 2 at 75% of the re-anchored max, rounded to equipment');
+});
+test('lighter-than-prescribed consistent load with missed reps re-anchors the training max down',()=>{
+ const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'main',trainingMax:130};
+ const s=state(),session=start(s,r);
+ // Week 1: 3x10 @ 70% of 130 → 91, rounds to 90.
+ assert.equal(session.rules.program.lifts[0].weight.both,90);
+ // All sets lighter than prescribed and short of the 10-rep target:
+ // clear evidence the max is too high → re-anchor down via Epley(80x8).
+ for(let i=0;i<3;i++)log(s,session,'both',8,{weight:80});
+ finish(session);
+ const next=start(s,r),lift=next.rules.program.lifts[0];
+ assert.ok(Math.abs(lift.trainingMax.both-80*(1+8/30))<1e-9,'re-anchored down from actual 80x8 via Epley');
+});
+test('downward re-anchor does not fire on mixed loads, hit targets, deloads, or easy mode',()=>{
+ const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'main',trainingMax:130};
+ { // mixed loads: hold
+  const s=state(),session=start(s,r);
+  log(s,session,'both',8,{weight:80});log(s,session,'both',8,{weight:85});log(s,session,'both',8,{weight:80});
+  finish(session);
+  assert.equal(start(s,r).rules.program.lifts[0].trainingMax.both,130);
+ }
+ { // lighter but reps hit: hold
+  const s=state(),session=start(s,r);
+  for(let i=0;i<3;i++)log(s,session,'both',10,{weight:80});
+  finish(session);
+  assert.equal(start(s,r).rules.program.lifts[0].trainingMax.both,130);
+ }
+ { // incomplete session: hold
+  const s=state(),session=start(s,r);
+  for(let i=0;i<2;i++)log(s,session,'both',8,{weight:80});
+  finish(session);
+  assert.equal(start(s,r).rules.program.lifts[0].trainingMax.both,130);
+ }
 });
 test('lighter-than-prescribed or mixed loads hold the training max',()=>{
  const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'main',trainingMax:100};

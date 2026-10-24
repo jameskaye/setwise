@@ -180,7 +180,11 @@ export function buildProgramSession(routine:Routine,workoutId:string,state:Snaps
         // A load override in the saved routine raises the floor for future
         // sessions; earned progression can continue above it.
         if(repProgression&&config?.loadOverride!==undefined&&load!==undefined)load=Math.max(load,config.loadOverride);
-        if(load!==undefined)lift.weight[side]=isDeload(week)?roundLoad(load*.9,v.increment):load;
+        // Deloads cut accessory/controlled loads to 60% (matching the main-lift
+        // deload intensity), not just 10%: a deload that doesn't feel light
+        // isn't dissipating fatigue. Next normal session still uses the
+        // pre-deload load (deloads are ignored by the prior-session filter).
+        if(load!==undefined)lift.weight[side]=isDeload(week)?roundLoad(load*.6,v.increment):load;
       }
     }
     return lift;

@@ -178,6 +178,7 @@ test('accessory deloads halve sets with no rep-out target',()=>{
  const deload=start(s,r),lift=deload.rules.program.lifts[0];
  assert.equal(deload.rules.program.week,7);
  assert.equal(lift.sets,2);assert.equal(lift.repOutTarget,null);
+ assert.equal(lift.weight.both,65,'deload cuts accessory load to 60% of the progressed 105 (63, rounded to equipment)');
 });
 test('a training-max override raises the floor mid-cycle; the chain still owns increases',()=>{
  const s=state(),session=start(s);

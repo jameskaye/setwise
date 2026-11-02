@@ -240,3 +240,4 @@ test('Muse API: programmed sessions allow reordering but not lineup changes',asy
 
  sql.close();rmSync(temp,{recursive:true,force:true});
 });
+

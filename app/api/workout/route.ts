@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {browserOwner,sameOrigin} from '@/lib/server-auth';
-import {ApiError,latestRoutine,saveRoutine} from '@/db/routine-store';
+import {ApiError,currentRoutine,latestRoutine,saveRoutine} from '@/db/routine-store';
 import {saveRoutineSchema,supersetsSchema} from '@/lib/routine';
 import {buildProgramSession,programWeek,nextProgramWorkout} from '@/lib/rtf';
 import {database,query,initialize,snapshot} from '@/db/store';
@@ -22,7 +22,8 @@ export const actionSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('swap_variant'),sessionId:id,from:id,to:id,force:z.boolean().optional()}),
  z.object({action:z.literal('coach'),id:id,sessionId:id,variantId:id,message:z.string().trim().min(1).max(2000)}),
  z.object({action:z.literal('variant'),id:id,exerciseId:z.string().max(180),baseName:z.string().trim().max(80),name:z.string().trim().min(1).max(100),equipment:z.string().trim().min(1).max(100),unilateral:z.boolean(),loadMode:z.enum(['per leg','per dumbbell','total load','machine load']),increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)}),
- z.object({action:z.literal('targets'),variantId:id,increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)})
+ z.object({action:z.literal('targets'),variantId:id,increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)}),
+ z.object({action:z.literal('make_default'),workoutId:id,oldVariantId:id,newVariantId:id})
 ]);
 class InputError extends Error{}
 function reply(body:unknown,status=200){return Response.json(body,{status,headers:{'Cache-Control':'no-store, private'}});}
@@ -211,6 +212,30 @@ export async function performWorkout(owner:string,input:unknown){try{
   } else if(a.action==='targets'){
     if(a.minReps>a.maxReps)throw new InputError('Minimum reps cannot exceed maximum reps.');
     await query('UPDATE variants SET increment = ?, min_reps = ?, max_reps = ?, default_sets = ? WHERE id = ? AND owner = ?',a.increment,a.minReps,a.maxReps,a.defaultSets,a.variantId,owner).run();
+  } else if(a.action==='make_default'){
+    // Persist a mid-workout exercise swap as the default for future sessions:
+    // replace oldVariantId with newVariantId in the workout template and move
+    // the program-lift config (profile) to the new variant. The new variant
+    // calibrates its own load from history; the old variant's progression
+    // does not transfer.
+    if(!state.variants.some(v=>v.id===a.newVariantId))throw new InputError('Exercise variant not found.');
+    const {revision,routine}=await currentRoutine(owner,state);
+    const workout=routine.workouts.find(w=>w.id===a.workoutId);
+    if(!workout)throw new InputError('Workout not found.');
+    const ex=workout.exercises.find(e=>e.variantId===a.oldVariantId);
+    if(!ex)throw new InputError('Exercise not in this workout.');
+    if(workout.exercises.some(e=>e.variantId===a.newVariantId))throw new InputError('Exercise already in this workout.');
+    ex.variantId=a.newVariantId;delete (ex as any).linkedVariants;
+    if(routine.program){
+      const oldIdx=routine.program.lifts.findIndex(l=>l.workoutId===a.workoutId&&l.variantId===a.oldVariantId);
+      if(oldIdx>=0){
+        const oldCfg=routine.program.lifts[oldIdx];routine.program.lifts.splice(oldIdx,1);
+        if(!routine.program.lifts.some(l=>l.workoutId===a.workoutId&&l.variantId===a.newVariantId))
+          routine.program.lifts.push({workoutId:a.workoutId,variantId:a.newVariantId,profile:oldCfg.profile});
+      }
+    }
+    await saveRoutine(owner,{requestId:`make-default-${a.workoutId}-${now}`,expectedRevision:revision,
+      reason:`Default ${a.workoutId} exercise changed from ${a.oldVariantId} to ${a.newVariantId}`,routine},state);
   }
   return reply(await snapshot(owner));
 }catch(e){return errorReply(e);}}

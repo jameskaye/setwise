@@ -71,9 +71,9 @@ test('unknown load calibration and rep-range progression for controlled and acce
   for(let i=0;i<3;i++)log(s,session,'both',profile==='main'?10:profile==='accessory'?(i===2?7:6):6,{weight:100});
   finish(session);const next=start(s,r),lift=next.rules.program.lifts[0];
   assert.equal(lift.repOutTarget,profile==='main'?null:6);
-  // Main: calibration TM from 100/0.7 plus double-progression +5 → week 2 weight.
+  // Main: calibration TM from Epley(100,10)=133.3 plus double-progression +5 → week 2 weight.
   // Others: rep-range +5 on the weight.
-  assert.equal(lift.weight.both,profile==='main'?110:105);
+  assert.equal(lift.weight.both,profile==='main'?105:105);
  }
 });
 test('rep-range lifts progress when the final set reaches the target, and hold below it or when incomplete',()=>{
@@ -119,6 +119,20 @@ test('lighter-than-prescribed consistent load with missed reps re-anchors the tr
  finish(session);
  const next=start(s,r),lift=next.rules.program.lifts[0];
  assert.ok(Math.abs(lift.trainingMax.both-80*(1+8/30))<1e-9,'re-anchored down from actual 80x8 via Epley');
+});
+test('calibration session (no training max) estimates TM via Epley, not load/intensity',()=>{
+ // Regression: a first-session weight is a guess, not a prescribed set at
+ // intensity. 165x5 at 75% must give Epley(165,5)=192.5, not 165/0.75=220.
+ const r=structuredClone(routine);
+ // Remove the training max so the lift calibrates from scratch.
+ delete r.program.lifts[0].trainingMax;
+ const s=state(),session=start(s,r);
+ // No prescription on a calibration session.
+ assert.equal(session.rules.program.lifts[0].weight.both,undefined);
+ for(let i=0;i<3;i++)log(s,session,'both',5,{weight:165});
+ finish(session);
+ const next=start(s,r),lift=next.rules.program.lifts[0];
+ assert.ok(Math.abs(lift.trainingMax.both-165*(1+5/30))<1e-9,'calibration TM from Epley(165,5), not 165/0.75');
 });
 test('downward re-anchor does not fire on mixed loads, hit targets, deloads, or easy mode',()=>{
  const r=structuredClone(routine);r.program.lifts[0]={workoutId:'a',variantId:'bench',profile:'main',trainingMax:130};

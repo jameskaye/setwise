@@ -81,8 +81,15 @@ export function liftOutcome(session:Session,lift:ProgramLift,side:Side,sets:Logg
     const reps=Math.max(...work.map(s=>s.reps));
     tm=actual*(1+reps/30);
     reanchored=adapted?'up':'down';
-  }else{
-    tm=lift.trainingMax[side]??(lift.intensity&&load?load/lift.intensity:undefined);
+  }else if(lift.trainingMax[side]!==undefined){
+    tm=lift.trainingMax[side];
+  }else if(actual!==undefined&&work.length>0){
+    // No training max yet (calibration session): estimate from best-set
+    // performance via Epley, not load/intensity. The first-session weight is
+    // a guess, not a prescribed set at this intensity — dividing it by the
+    // intensity inflates the max (e.g. 165/0.75 = 220 from a 165x5).
+    const reps=Math.max(...work.map(s=>s.reps));
+    tm=actual*(1+reps/30);
   }
   // Double progression: all working sets must hit the rep target. Clear every
   // set on a complete, unmodified, pain-free, non-deload session → +1

@@ -142,6 +142,22 @@ export async function performWorkout(owner:string,input:unknown){try{
     const rules={...session!.rules,supersets:a.supersets};
     const result=await query("UPDATE sessions SET rules = ? WHERE id = ? AND owner = ? AND status = 'active' AND rules = ?",JSON.stringify(rules),session!.id,owner,JSON.stringify(session!.rules)).run();
     if(!result.meta.changes)throw new ApiError(409,'Workout changed. Reload before saving pairings.');
+    // Persist the pairing to the routine template so future sessions of this
+    // workout start with it (sessions inherit template.supersets at start).
+    // Best-effort: a revision conflict leaves the session pairing saved and
+    // the template unchanged rather than failing the whole action.
+    const workoutId=session!.rules.program?.workoutId;
+    if(workoutId){
+      try{
+        const {revision,routine}=await currentRoutine(owner,state);
+        const workout=routine.workouts.find(w=>w.id===workoutId);
+        if(workout&&JSON.stringify(workout.supersets??[])!==JSON.stringify(a.supersets)){
+          workout.supersets=a.supersets;
+          await saveRoutine(owner,{requestId:`supersets-${workoutId}-${now}`,expectedRevision:revision,
+            reason:`Superset pairing saved for ${workoutId}`,routine},state);
+        }
+      }catch(e){console.error('Superset pairing could not be saved to the routine template',e);}
+    }
   } else if(a.action==='save_routine'){
     const {action,...input}=a;await saveRoutine(owner,input,state);
   } else if(a.action==='session'){

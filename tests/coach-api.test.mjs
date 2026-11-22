@@ -84,7 +84,7 @@ test('mobile auth, deterministic logging, validated coach proposals, apply/retry
   const save={action:'save_routine',requestId:'rtf-api-save',expectedRevision:1,reason:'test program',routine:programRoutine};
   assert.equal((await post(save)).status,200);assert.equal((await post(save)).status,200);
   assert.equal((await post({action:'finish',sessionId:active.id})).status,200);
-  const begin=workoutId=>post({action:'start',id:crypto.randomUUID(),name:workoutId,plan:[variant.id],workoutId,expectedRoutineRevision:2});
+  const begin=async workoutId=>{const ctx=await read();return post({action:'start',id:crypto.randomUUID(),name:workoutId,plan:[variant.id],workoutId,expectedRoutineRevision:ctx.routine.revision});};
   assert.equal((await begin('a')).status,200);data=await read();let programmed=data.sessions.find(s=>s.status==='active');
   assert.equal(programmed.rules.program.week,1);assert.equal(programmed.rules.program.lifts[0].weight.left,70);
   assert.deepEqual(programmed.rules.supersets,[[variant.id,buddy]],'saved pairings freeze into the active session');

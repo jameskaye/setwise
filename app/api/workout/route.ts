@@ -200,7 +200,32 @@ export async function performWorkout(owner:string,input:unknown){try{
     if(rules.program)rules.program={...rules.program,lifts:rules.program.lifts.map(l=>{
       if(l.variantId!==a.from)return l;
       const swapped={...l,variantId:a.to};
-      if(a.force&&!linked)swapped.modified=true;
+      if(a.force&&!linked){
+        swapped.modified=true;
+        // A forced swap to a different exercise must calibrate from the new
+        // variant's own history, not inherit the replaced exercise's load
+        // (e.g. swapping an RDL in over a leg extension kept the extension's
+        // 40 lb instead of the RDL's own 75 lb).
+        const prior=state.sessions.filter(s=>s.status==='finished')
+          .sort((x,y)=>y.startedAt-x.startedAt)
+          .find(s=>state.sets.some(set=>set.sessionId===s.id&&set.variantId===a.to&&set.type==='working'));
+        if(prior){
+          const work=state.sets.filter(set=>set.sessionId===prior.id&&set.variantId===a.to&&set.type==='working');
+          for(const side of ['left','right','both'] as const){
+            const set=work.find(s=>s.side===side);
+            if(set&&swapped.weight)swapped.weight[side]=set.weight;
+          }
+          if(swapped.intensity){
+            const best=work.reduce((m,s)=>s.reps>m.reps?s:m,work[0]);
+            if(best){
+              const tm=best.weight*(1+best.reps/30)/swapped.intensity;
+              for(const side of ['left','right','both'] as const){
+                if(work.some(s=>s.side===side)&&swapped.trainingMax)swapped.trainingMax[side]=tm;
+              }
+            }
+          }
+        }
+      }
       return swapped;
     })};
     const result=await query("UPDATE sessions SET plan = ?, prescriptions = ?, rules = ? WHERE id = ? AND owner = ? AND status = 'active' AND plan = ? AND prescriptions = ? AND rules = ?",

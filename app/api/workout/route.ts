@@ -2,7 +2,7 @@ import {z} from 'zod';
 import {browserOwner,sameOrigin} from '@/lib/server-auth';
 import {ApiError,currentRoutine,latestRoutine,saveRoutine} from '@/db/routine-store';
 import {saveRoutineSchema,supersetsSchema} from '@/lib/routine';
-import {buildProgramSession,programWeek,nextProgramWorkout} from '@/lib/rtf';
+import {buildProgramSession,programWeek,nextProgramWorkout,roundLoad} from '@/lib/rtf';
 import {database,query,initialize,snapshot} from '@/db/store';
 import {interpretCoach,recommend} from '@/lib/coach';
 import type {LoggedSet} from '@/lib/model';
@@ -23,7 +23,18 @@ export const actionSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('coach'),id:id,sessionId:id,variantId:id,message:z.string().trim().min(1).max(2000)}),
  z.object({action:z.literal('variant'),id:id,exerciseId:z.string().max(180),baseName:z.string().trim().max(80),name:z.string().trim().min(1).max(100),equipment:z.string().trim().min(1).max(100),unilateral:z.boolean(),loadMode:z.enum(['per leg','per dumbbell','total load','machine load']),increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)}),
  z.object({action:z.literal('targets'),variantId:id,increment:num.min(.5).max(100),minReps:num.int().min(1).max(50),maxReps:num.int().min(1).max(50),defaultSets:num.int().min(1).max(10)}),
- z.object({action:z.literal('make_default'),workoutId:id,oldVariantId:id,newVariantId:id})
+ z.object({action:z.literal('make_default'),workoutId:id,oldVariantId:id,newVariantId:id}),
+ // Hot-patch an active session's prescriptions without touching logged sets:
+ // correct a wrong weight/TM mid-workout. Optimistic concurrency via the
+ // rules snapshot: the update only lands if the session hasn't changed
+ // since the caller read it.
+ z.object({action:z.literal('patch_session'),sessionId:id,expectedRules:z.string().min(1).optional(),
+   lifts:z.array(z.object({variantId:id,
+     weight:z.record(z.enum(['left','right','both']),num.min(0).max(2000)).optional(),
+     trainingMax:z.record(z.enum(['left','right','both']),num.min(0).max(2000)).optional(),
+     reps:num.int().min(1).max(100).optional(),maxReps:num.int().min(1).max(100).optional(),
+     sets:num.int().min(1).max(30).optional(),intensity:num.min(0).max(1).optional()})
+     .refine(p=>p.weight||p.trainingMax||p.reps||p.maxReps||p.sets||p.intensity,'No changes supplied.')).min(1).max(30)})
 ]);
 class InputError extends Error{}
 function reply(body:unknown,status=200){return Response.json(body,{status,headers:{'Cache-Control':'no-store, private'}});}
@@ -277,6 +288,46 @@ export async function performWorkout(owner:string,input:unknown){try{
     }
     await saveRoutine(owner,{requestId:`make-default-${a.workoutId}-${now}`,expectedRevision:revision,
       reason:`Default ${a.workoutId} exercise changed from ${a.oldVariantId} to ${a.newVariantId}`,routine},state);
+  } else if(a.action==='patch_session'){
+    // Hot-patch an active session's prescriptions. Only rules.program.lifts
+    // change; logged sets, plan order, supersets and everything else are
+    // untouched, so work already done in the session is preserved.
+    if(session!.status!=='active')throw new InputError('Workout is not active.');
+    if(a.expectedRules!==undefined&&JSON.stringify(session!.rules)!==a.expectedRules)throw new ApiError(409,'Workout changed. Reload before patching.');
+    const lifts=session!.rules.program?.lifts;
+    if(!lifts)throw new InputError('This workout has no program prescriptions to patch.');
+    for(const p of a.lifts){
+      if(!session!.plan.includes(p.variantId))throw new InputError(`Exercise ${p.variantId} is not in this workout.`);
+      if(!lifts.some(l=>l.variantId===p.variantId))throw new InputError(`Exercise ${p.variantId} has no prescription to patch.`);
+    }
+    const patched={...session!.rules,program:{...session!.rules.program!,lifts:lifts.map(l=>{
+      const p=a.lifts.find(x=>x.variantId===l.variantId);
+      if(!p)return l;
+      const out={...l};
+      if(p.reps!==undefined)out.reps=p.reps;
+      if(p.maxReps!==undefined)out.maxReps=p.maxReps;
+      if(p.sets!==undefined)out.sets=p.sets;
+      if(p.intensity!==undefined)out.intensity=p.intensity;
+      if(p.weight)out.weight={...l.weight,...p.weight};
+      if(p.trainingMax){
+        out.trainingMax={...l.trainingMax,...p.trainingMax};
+        // A corrected TM re-derives the working weight at the lift's intensity.
+        if(out.intensity!==undefined&&out.intensity!==null&&out.weight){
+          const v=state.variants.find(v=>v.id===l.variantId);
+          for(const side of Object.keys(p.trainingMax) as ('left'|'right'|'both')[]){
+            if(out.trainingMax[side]!==undefined)out.weight[side]=roundLoad(out.trainingMax[side]!*out.intensity,v?.increment??5);
+          }
+        }
+      }
+      return out;
+    })}};
+    // Note: the write matches on id/owner/status only, not the rules string:
+    // the rules JSON round-trips through the DB with a serialization that
+    // does not always re-stringify identically (e.g. after a swap adds a
+    // field), so a rules-string WHERE would spuriously refuse live sessions.
+    // Optimistic concurrency lives in the expectedRules check above.
+    const result=await query("UPDATE sessions SET rules = ? WHERE id = ? AND owner = ? AND status = 'active'",JSON.stringify(patched),session!.id,owner).run();
+    if(!result.meta.changes)throw new ApiError(409,'Workout changed. Reload before patching.');
   }
   return reply(await snapshot(owner));
 }catch(e){return errorReply(e);}}

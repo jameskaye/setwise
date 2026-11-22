@@ -217,6 +217,30 @@ test('Muse API: swap_variant force overrides guards on explicit command',async()
  assert.equal((await post('/api/muse',{action:'finish',sessionId})).status,200);
 });
 
+test('Muse API: patch_session hot-patches prescriptions, preserves logged sets',async()=>{
+ const sessionId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'start',id:sessionId,name:'Patch day',plan:['swap-smith'],workoutId:'sw',expectedRoutineRevision:1})).status,200);
+ let ctx=await (await get('/api/muse')).json();
+ const lift=ctx.activeSession.rules.program.lifts[0];
+ const setId=crypto.randomUUID();
+ assert.equal((await post('/api/muse',{action:'log',id:setId,sessionId,variantId:'swap-smith',weight:lift.weight.both,reps:5,rir:1,side:'both',type:'working',painLocation:'',painSeverity:0,note:''})).status,200);
+ // Stale rules snapshot is rejected.
+ assert.equal((await post('/api/muse',{action:'patch_session',sessionId,expectedRules:'{}',lifts:[{variantId:'swap-smith',weight:{both:100}}]})).status,409);
+ // Patch the weight; the logged set is untouched and the session stays active.
+ ctx=await (await get('/api/muse')).json();
+ const rules=JSON.stringify(ctx.activeSession.rules);
+ assert.equal((await post('/api/muse',{action:'patch_session',sessionId,expectedRules:rules,lifts:[{variantId:'swap-smith',weight:{both:100}}]})).status,200);
+ ctx=await (await get('/api/muse')).json();
+ assert.equal(ctx.activeSession.rules.program.lifts[0].weight.both,100,'weight patched');
+ assert.equal(ctx.activeSession.status,'active');
+ const hist=await (await get('/api/muse/history?kind=sets&sessionId='+sessionId)).json();
+ assert.ok(hist.items.some(s=>s.id===setId&&s.weight===lift.weight.both),'logged set preserved');
+ // Unknown exercise is rejected.
+ ctx=await (await get('/api/muse')).json();
+ assert.equal((await post('/api/muse',{action:'patch_session',sessionId,expectedRules:JSON.stringify(ctx.activeSession.rules),lifts:[{variantId:'nope',weight:{both:100}}]})).status,400);
+ assert.equal((await post('/api/muse',{action:'finish',sessionId})).status,200);
+});
+
 test('Muse API: programmed sessions allow reordering but not lineup changes',async()=>{
  const routine={name:'Reorder routine',notes:'',constraints:[],program:{id:'swap-cycle',lifts:[
   {workoutId:'sw',variantId:'swap-smith',profile:'auxiliary',trainingMax:160},
